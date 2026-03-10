@@ -1,0 +1,297 @@
+---
+title: 'Events'
+description: 'Real-time job progress events via Server-Sent Events (SSE)'
+---
+
+## Stream Job Events
+
+<api-endpoint>
+  GET /api/jobs/{job_id}/events
+</api-endpoint>
+
+Stream real-time progress events for a job using Server-Sent Events (SSE). This endpoint provides live updates as pages are crawled, processed, and completed.
+
+### Path Parameters
+
+<ParamField path="job_id" type="string" required>
+  Job identifier (UUID).
+</ParamField>
+
+### Response
+
+Returns a Server-Sent Events (SSE) stream with automatic keepalive pings every 15 seconds.
+
+### Event Types
+
+The SSE stream emits various event types to track job progress:
+
+#### Job Started
+
+```json
+{
+  "event": "job_started",
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2026-03-10T15:30:00Z"
+}
+```
+
+#### Page Discovered
+
+Emitted when a new page URL is discovered during crawling.
+
+```json
+{
+  "event": "page_discovered",
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "url": "https://docs.example.com/api/authentication",
+  "depth": 2,
+  "timestamp": "2026-03-10T15:30:05Z"
+}
+```
+
+#### Page Started
+
+Emitted when processing begins for a page.
+
+```json
+{
+  "event": "page_started",
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "url": "https://docs.example.com/api/authentication",
+  "timestamp": "2026-03-10T15:30:10Z"
+}
+```
+
+#### Page Completed
+
+Emitted when a page is successfully crawled and converted.
+
+```json
+{
+  "event": "page_completed",
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "url": "https://docs.example.com/api/authentication",
+  "output_file": "/data/output/example-docs/api/authentication.md",
+  "duration_ms": 2340,
+  "timestamp": "2026-03-10T15:30:12Z"
+}
+```
+
+#### Page Failed
+
+Emitted when a page fails to process.
+
+```json
+{
+  "event": "page_failed",
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "url": "https://docs.example.com/broken-page",
+  "error": "Timeout after 30s",
+  "timestamp": "2026-03-10T15:30:45Z"
+}
+```
+
+#### Progress Update
+
+Emitted periodically with overall job progress statistics.
+
+```json
+{
+  "event": "progress",
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "pages_completed": 45,
+  "pages_failed": 2,
+  "pages_total": 120,
+  "percentage": 37.5,
+  "current_url": "https://docs.example.com/api/webhooks",
+  "timestamp": "2026-03-10T15:31:00Z"
+}
+```
+
+#### Job Paused
+
+Emitted when the job is paused.
+
+```json
+{
+  "event": "job_paused",
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "pages_completed": 45,
+  "pages_total": 120,
+  "state_file": "/data/output/example-docs/.job_state.json",
+  "timestamp": "2026-03-10T15:32:00Z"
+}
+```
+
+#### Job Resumed
+
+Emitted when the job is resumed from a paused state.
+
+```json
+{
+  "event": "job_resumed",
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2026-03-10T15:33:00Z"
+}
+```
+
+#### Job Completed
+
+Emitted when all pages have been processed successfully.
+
+```json
+{
+  "event": "job_completed",
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "pages_completed": 118,
+  "pages_failed": 2,
+  "pages_total": 120,
+  "duration_seconds": 180,
+  "output_path": "/data/output/example-docs",
+  "timestamp": "2026-03-10T15:33:00Z"
+}
+```
+
+#### Job Failed
+
+Emitted when the job encounters a fatal error.
+
+```json
+{
+  "event": "job_failed",
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "error": "Failed to connect to target site: Connection timeout",
+  "pages_completed": 10,
+  "timestamp": "2026-03-10T15:31:30Z"
+}
+```
+
+#### Job Cancelled
+
+Emitted when the job is cancelled by the user.
+
+```json
+{
+  "event": "job_cancelled",
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "pages_completed": 45,
+  "timestamp": "2026-03-10T15:32:15Z"
+}
+```
+
+### Example Usage with JavaScript
+
+```javascript
+const eventSource = new EventSource(
+  'https://api.docrawl.com/api/jobs/550e8400-e29b-41d4-a716-446655440000/events'
+);
+
+eventSource.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log('Event:', data.event);
+  
+  switch (data.event) {
+    case 'progress':
+      console.log(`Progress: ${data.percentage}% (${data.pages_completed}/${data.pages_total})`);
+      break;
+    
+    case 'page_completed':
+      console.log(`Completed: ${data.url}`);
+      break;
+    
+    case 'page_failed':
+      console.error(`Failed: ${data.url} - ${data.error}`);
+      break;
+    
+    case 'job_completed':
+      console.log(`Job finished! Output: ${data.output_path}`);
+      eventSource.close();
+      break;
+    
+    case 'job_failed':
+      console.error(`Job failed: ${data.error}`);
+      eventSource.close();
+      break;
+  }
+};
+
+eventSource.onerror = (error) => {
+  console.error('SSE connection error:', error);
+  eventSource.close();
+};
+```
+
+### Example Usage with curl
+
+```bash
+curl -N https://api.docrawl.com/api/jobs/550e8400-e29b-41d4-a716-446655440000/events
+```
+
+The `-N` flag disables buffering to receive events in real-time.
+
+### Example Usage with Python
+
+```python
+import requests
+import json
+
+job_id = "550e8400-e29b-41d4-a716-446655440000"
+url = f"https://api.docrawl.com/api/jobs/{job_id}/events"
+
+with requests.get(url, stream=True) as response:
+    for line in response.iter_lines():
+        if line:
+            # SSE format: "data: {json}\n\n"
+            if line.startswith(b'data: '):
+                data = json.loads(line[6:])
+                event_type = data.get('event')
+                
+                if event_type == 'progress':
+                    print(f"Progress: {data['percentage']}%")
+                
+                elif event_type == 'job_completed':
+                    print(f"Job completed! Output: {data['output_path']}")
+                    break
+                
+                elif event_type == 'job_failed':
+                    print(f"Job failed: {data['error']}")
+                    break
+```
+
+### Connection Details
+
+<ResponseField name="Content-Type">
+  `text/event-stream`
+</ResponseField>
+
+<ResponseField name="Cache-Control">
+  `no-cache`
+</ResponseField>
+
+<ResponseField name="Connection">
+  Keep-alive with automatic reconnection support.
+</ResponseField>
+
+<ResponseField name="Ping Interval">
+  15 seconds - keepalive pings are sent automatically to prevent connection timeout.
+</ResponseField>
+
+### Error Responses
+
+<ResponseField name="404 Not Found">
+  Job not found.
+  
+  ```json
+  {
+    "detail": "Job not found"
+  }
+  ```
+</ResponseField>
+
+### Best Practices
+
+1. **Handle reconnection**: SSE clients should automatically reconnect if the connection drops.
+2. **Process events asynchronously**: Don't block the event handler with long-running operations.
+3. **Close connections**: Always close the SSE connection when the job completes or fails.
+4. **Error handling**: Implement proper error handling for connection failures and malformed events.
+5. **Timeouts**: Set appropriate timeouts for the SSE connection based on expected job duration.

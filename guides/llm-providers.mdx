@@ -1,0 +1,299 @@
+---
+title: 'LLM Providers'
+description: 'Configure local and cloud LLM providers for crawling and processing'
+---
+
+Docrawl supports four LLM providers: Ollama (local), OpenRouter (cloud), OpenCode (cloud), and LM Studio (local). Each provider can be used independently, and you can mix providers across different model roles.
+
+## Model Roles
+
+Docrawl uses **3 specialized models** for different tasks:
+
+| Role | Usage | Recommended Size | Performance Impact |
+|------|-------|-----------------|--------------------|
+| **Crawl** | Discovery & URL filtering | 3B-8B (fast) | High - runs frequently during discovery |
+| **Pipeline** | Markdown cleanup | 6B-14B (balanced) | Medium - runs per page |
+| **Reasoning** | Complex analysis (future use) | 14B+ (powerful) | Low - reserved for advanced features |
+
+<Note>
+You can use different providers for each role. For example, use Ollama for fast crawl operations and OpenRouter for high-quality pipeline cleanup.
+</Note>
+
+## Provider Configuration
+
+<Tabs>
+  <Tab title="Ollama">
+    ### Ollama (Local, Free)
+
+    Run LLMs locally without API costs or rate limits.
+
+    #### Installation
+
+    ```bash
+    # Install Ollama
+    curl -fsSL https://ollama.com/install.sh | sh
+
+    # Start Ollama server
+    ollama serve
+
+    # Pull recommended models
+    ollama pull mistral:7b        # Crawl model (fast)
+    ollama pull qwen2.5:14b       # Pipeline model (balanced)
+    ```
+
+    #### Configuration
+
+    No API key required. Ollama runs on `http://localhost:11434` by default.
+
+    ```bash .env
+    # Optional: Override default URL
+    OLLAMA_URL=http://localhost:11434
+    ```
+
+    #### Docker Setup
+
+    When running Docrawl in Docker, the compose file automatically configures access to your host Ollama instance:
+
+    ```yaml docker-compose.yml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - OLLAMA_URL=http://host.docker.internal:11434
+    ```
+
+    <Warning>
+    Ensure Ollama is running on your host machine before starting Docker containers.
+    </Warning>
+
+    #### Model Selection
+
+    Select models in the UI without any prefix:
+    - `mistral:7b`
+    - `qwen2.5:14b`
+    - `llama3.3:70b`
+
+  </Tab>
+  <Tab title="OpenRouter">
+    ### OpenRouter (Cloud API)
+
+    Access 200+ models through a single API, including free options.
+
+    #### Get API Key
+
+    1. Visit [openrouter.ai/keys](https://openrouter.ai/keys)
+    2. Create an account and generate an API key
+    3. Check [pricing page](https://openrouter.ai/models) for model costs
+
+    #### Configuration
+
+    ```bash .env
+    OPENROUTER_API_KEY=sk-or-v1-...
+    ```
+
+    #### Model Selection
+
+    Models with the 🆓 indicator in the UI are free. Examples:
+    - `qwen/qwen3-coder:free`
+    - `meta-llama/llama-3.3-70b:free`
+    - `deepseek/deepseek-r1:free`
+
+    <Note>
+    The `:free` suffix indicates zero-cost models. Check the OpenRouter UI for current availability.
+    </Note>
+
+    #### Usage Example
+
+    Select models in the UI with the full path:
+    ```
+    openrouter/qwen/qwen3-coder:free
+    ```
+
+    Or use the model selector dropdown which automatically detects available models.
+
+  </Tab>
+  <Tab title="OpenCode">
+    ### OpenCode (Cloud API)
+
+    OpenCode provides access to Claude, GPT, and other models through a unified API.
+
+    #### Get API Key
+
+    1. Visit [opencode.ai](https://opencode.ai)
+    2. Create an account and generate an API key
+
+    #### Configuration
+
+    ```bash .env
+    OPENCODE_API_KEY=...
+    ```
+
+    #### Available Models
+
+    ```python src/llm/client.py
+    PROVIDER_MODELS = {
+        "opencode": [
+            "opencode/claude-sonnet-4-5",
+            "opencode/claude-haiku-4-5",
+            "opencode/gpt-5-nano",
+            "opencode/minimax-m2.5-free",
+            "opencode/kimi-k2.5-free",
+            "opencode/glm-4.7-free",
+        ]
+    }
+    ```
+
+    Models with `-free` suffix have no per-token cost.
+
+    #### Usage Example
+
+    Select models in the UI:
+    ```
+    opencode/claude-sonnet-4-5
+    ```
+
+  </Tab>
+  <Tab title="LM Studio">
+    ### LM Studio (Local, OpenAI-compatible)
+
+    Run models locally using LM Studio's OpenAI-compatible server.
+
+    #### Installation
+
+    1. Download from [lmstudio.ai](https://lmstudio.ai)
+    2. Install and launch LM Studio
+    3. Download models from the built-in model browser
+    4. Start the local server (Developer → Local Server)
+
+    #### Configuration
+
+    ```bash .env
+    # Default LM Studio server URL
+    LMSTUDIO_URL=http://localhost:1234/v1
+
+    # API key is optional (LM Studio doesn't require one by default)
+    LMSTUDIO_API_KEY=
+    ```
+
+    #### Docker Setup
+
+    Similar to Ollama, use `host.docker.internal` to access LM Studio from Docker:
+
+    ```bash .env
+    LMSTUDIO_URL=http://host.docker.internal:1234/v1
+    ```
+
+    #### Model Selection
+
+    Models appear in the UI with the `lmstudio/` prefix:
+    ```
+    lmstudio/llama-3.3-70b
+    ```
+
+  </Tab>
+</Tabs>
+
+## Mixing Providers
+
+You can use different providers for different roles to optimize cost and performance:
+
+<CardGroup cols={2}>
+  <Card title="Budget Setup" icon="piggy-bank">
+    - **Crawl**: Ollama (`mistral:7b`)
+    - **Pipeline**: OpenRouter free tier
+    - **Reasoning**: N/A
+    
+    Zero cost, good performance
+  </Card>
+  <Card title="Performance Setup" icon="rocket">
+    - **Crawl**: Ollama (`mistral:7b`)
+    - **Pipeline**: OpenCode Claude Sonnet
+    - **Reasoning**: OpenCode GPT-5
+    
+    Fast discovery, high-quality output
+  </Card>
+  <Card title="Fully Local" icon="house">
+    - **Crawl**: Ollama (`mistral:7b`)
+    - **Pipeline**: Ollama (`qwen2.5:14b`)
+    - **Reasoning**: Ollama (`llama3.3:70b`)
+    
+    Complete privacy, no API costs
+  </Card>
+  <Card title="Hybrid" icon="shuffle">
+    - **Crawl**: LM Studio (fast local model)
+    - **Pipeline**: OpenRouter (quality model)
+    - **Reasoning**: OpenCode (reasoning model)
+    
+    Balanced approach
+  </Card>
+</CardGroup>
+
+## Model Selection Tips
+
+### Crawl Model
+- Prioritize speed over quality
+- Handles URL filtering and basic text analysis
+- Recommended: 3B-8B parameters
+- Examples: `mistral:7b`, `qwen/qwen3-coder:free`
+
+### Pipeline Model
+- Balances quality and speed
+- Cleans markdown, removes navigation/footer content
+- Recommended: 6B-14B parameters
+- Examples: `qwen2.5:14b`, `opencode/claude-haiku-4-5`
+
+### Reasoning Model
+- Reserved for future complex analysis features
+- Can be the same as pipeline model
+- Recommended: 14B+ parameters
+
+## Troubleshooting
+
+<Accordion title="Ollama connection failed">
+  **Symptoms**: `Failed to get Ollama models` error
+
+  **Solutions**:
+  1. Verify Ollama is running: `ollama list`
+  2. Check the port: `curl http://localhost:11434/api/tags`
+  3. In Docker, verify `host.docker.internal` resolves
+  4. Check firewall rules for port 11434
+</Accordion>
+
+<Accordion title="OpenRouter rate limits">
+  **Symptoms**: 429 status code, rate limit errors
+
+  **Solutions**:
+  1. Use free models which have higher limits
+  2. Reduce `max_concurrent` in job settings
+  3. Increase `delay_ms` between requests
+  4. Upgrade to paid tier for higher limits
+</Accordion>
+
+<Accordion title="Model not appearing in UI">
+  **Symptoms**: Model dropdown is empty or missing models
+
+  **Solutions**:
+  1. Check API key is set correctly
+  2. Verify provider API is accessible
+  3. Clear browser cache and reload
+  4. Check browser console for API errors
+  5. Model cache refreshes every 60 seconds (see `MODEL_CACHE_TTL` in `src/llm/client.py:16`)
+</Accordion>
+
+## API Reference
+
+Model selection is handled in `src/llm/client.py`:
+
+```python
+# Environment variables
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+OPENCODE_API_KEY = os.environ.get("OPENCODE_API_KEY", "")
+LMSTUDIO_URL = os.environ.get("LMSTUDIO_URL", "http://localhost:1234/v1")
+LMSTUDIO_API_KEY = os.environ.get("LMSTUDIO_API_KEY", "")
+```
+
+The system automatically detects the provider based on model name format:
+- No prefix → Ollama
+- `openrouter/` prefix → OpenRouter
+- `opencode/` prefix → OpenCode
+- `lmstudio/` prefix → LM Studio

@@ -1,0 +1,494 @@
+---
+title: 'Health'
+description: 'System health and readiness checks'
+---
+
+## Health Check
+
+<api-endpoint>
+  GET /api/health/ready
+</api-endpoint>
+
+Check if the system is ready to accept crawl jobs. This endpoint performs comprehensive health checks on all critical system components.
+
+### Response
+
+<ResponseField name="ready" type="boolean">
+  Overall system readiness status. `true` if all critical checks pass.
+</ResponseField>
+
+<ResponseField name="checks" type="object">
+  Detailed status for each system component.
+  
+  <Expandable title="Health Checks">
+    <ResponseField name="checks.ollama" type="object">
+      Ollama service connectivity and status.
+      
+      <Expandable title="Ollama Check">
+        <ResponseField name="status" type="string">
+          Check status: `ok`, `error`, `unreachable`, or `timeout`.
+        </ResponseField>
+        
+        <ResponseField name="models_count" type="integer">
+          Number of models available (when status is `ok`).
+        </ResponseField>
+        
+        <ResponseField name="url" type="string">
+          Ollama service URL being checked.
+        </ResponseField>
+        
+        <ResponseField name="code" type="integer">
+          HTTP status code (when status is `error`).
+        </ResponseField>
+        
+        <ResponseField name="message" type="string">
+          Error message (when status is `error`).
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    
+    <ResponseField name="checks.lmstudio" type="object">
+      LM Studio service connectivity and status.
+      
+      <Expandable title="LM Studio Check">
+        <ResponseField name="status" type="string">
+          Check status: `ok`, `error`, `unreachable`, or `timeout`.
+        </ResponseField>
+        
+        <ResponseField name="models_count" type="integer">
+          Number of models available (when status is `ok`).
+        </ResponseField>
+        
+        <ResponseField name="url" type="string">
+          LM Studio service URL being checked.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    
+    <ResponseField name="checks.disk_space" type="object">
+      Disk space availability check.
+      
+      <Expandable title="Disk Space Check">
+        <ResponseField name="status" type="string">
+          Disk space status: `ok`, `warning`, `critical`, `not_found`, or `error`.
+          
+          - `ok`: More than 1 GB free
+          - `warning`: Less than 1 GB free
+          - `critical`: Less than 100 MB free
+        </ResponseField>
+        
+        <ResponseField name="free_gb" type="number">
+          Free disk space in gigabytes.
+        </ResponseField>
+        
+        <ResponseField name="total_gb" type="number">
+          Total disk space in gigabytes.
+        </ResponseField>
+        
+        <ResponseField name="used_percent" type="number">
+          Percentage of disk space used.
+        </ResponseField>
+        
+        <ResponseField name="path" type="string">
+          Path being checked (`/data`).
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    
+    <ResponseField name="checks.write_permissions" type="object">
+      Write permission check for output directory.
+      
+      <Expandable title="Write Permissions Check">
+        <ResponseField name="status" type="string">
+          Permission status: `ok`, `denied`, or `error`.
+        </ResponseField>
+        
+        <ResponseField name="path" type="string">
+          Path being checked for write access.
+        </ResponseField>
+        
+        <ResponseField name="note" type="string">
+          Additional information about the check.
+        </ResponseField>
+        
+        <ResponseField name="message" type="string">
+          Error message (when status is `error` or `denied`).
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="issues" type="array">
+  List of human-readable issue descriptions. Only present when `ready` is `false`.
+</ResponseField>
+
+### Example Request
+
+```bash
+curl https://api.docrawl.com/api/health/ready
+```
+
+### Example Response (Healthy)
+
+```json
+{
+  "ready": true,
+  "checks": {
+    "ollama": {
+      "status": "ok",
+      "models_count": 5,
+      "url": "http://localhost:11434"
+    },
+    "lmstudio": {
+      "status": "ok",
+      "models_count": 3,
+      "url": "http://localhost:1234"
+    },
+    "disk_space": {
+      "status": "ok",
+      "free_gb": 45.23,
+      "total_gb": 100.0,
+      "used_percent": 54.8
+    },
+    "write_permissions": {
+      "status": "ok",
+      "path": "/data"
+    }
+  }
+}
+```
+
+### Example Response (Unhealthy)
+
+```json
+{
+  "ready": false,
+  "issues": [
+    "Cannot connect to Ollama at http://localhost:11434. Is Ollama running? Try: ollama serve",
+    "Low disk space: 0.8GB free"
+  ],
+  "checks": {
+    "ollama": {
+      "status": "unreachable",
+      "url": "http://localhost:11434"
+    },
+    "lmstudio": {
+      "status": "unreachable",
+      "url": "http://localhost:1234"
+    },
+    "disk_space": {
+      "status": "warning",
+      "free_gb": 0.8,
+      "total_gb": 100.0,
+      "used_percent": 99.2
+    },
+    "write_permissions": {
+      "status": "ok",
+      "path": "/data"
+    }
+  }
+}
+```
+
+### HTTP Status Codes
+
+<ResponseField name="200 OK">
+  System is ready and all checks passed.
+</ResponseField>
+
+<ResponseField name="503 Service Unavailable">
+  System is not ready. Check the `issues` array for specific problems.
+  
+  The response body includes detailed check results and actionable error messages.
+</ResponseField>
+
+## Health Check Components
+
+### Ollama Connectivity
+
+Verifies that Ollama is running and accessible:
+
+- Connects to Ollama API (`http://localhost:11434` by default)
+- Lists available models
+- Timeout: 5 seconds
+
+**Common Issues:**
+- Ollama not installed or not running
+- Firewall blocking connection
+- Wrong URL configured
+
+**Solutions:**
+```bash
+# Start Ollama
+ollama serve
+
+# Verify manually
+curl http://localhost:11434/api/tags
+```
+
+### LM Studio Connectivity
+
+Verifies LM Studio local server status:
+
+- Connects to LM Studio API (`http://localhost:1234` by default)
+- Lists available models
+- Supports optional Bearer token authentication
+- Timeout: 5 seconds
+
+**Common Issues:**
+- LM Studio not running
+- Local server not started in LM Studio
+- Wrong port configured
+
+**Solutions:**
+1. Open LM Studio application
+2. Start the local server from the UI
+3. Verify the port matches (default: 1234)
+
+### Disk Space
+
+Monitors available disk space in `/data` directory:
+
+- **OK**: More than 1 GB free
+- **Warning**: Less than 1 GB free
+- **Critical**: Less than 100 MB free
+
+**Common Issues:**
+- Output directory filling up with crawl results
+- Large model files consuming space
+
+**Solutions:**
+```bash
+# Check disk usage
+df -h /data
+
+# Clean up old crawl outputs
+rm -rf /data/output/old-jobs/*
+```
+
+### Write Permissions
+
+Verifies write access to `/data` directory:
+
+- Attempts to create and delete a test file
+- Checks parent directory permissions if `/data` doesn't exist
+
+**Common Issues:**
+- Permission denied errors
+- Docker volume mount issues
+
+**Solutions:**
+```bash
+# Fix permissions (Linux/macOS)
+sudo chown -R $USER:$USER ./data
+chmod -R 755 ./data
+
+# Docker: Mount with correct permissions
+docker run -v $(pwd)/data:/data:rw docrawl
+```
+
+## Monitoring and Automation
+
+### Health Check Polling
+
+You can poll this endpoint to monitor system health:
+
+```python
+import requests
+import time
+
+def wait_for_ready(timeout=60):
+    """Wait for system to become ready."""
+    start = time.time()
+    
+    while time.time() - start < timeout:
+        try:
+            response = requests.get('https://api.docrawl.com/api/health/ready')
+            if response.status_code == 200:
+                print('System ready!')
+                return True
+        except requests.RequestException:
+            pass
+        
+        time.sleep(5)
+    
+    print('Timeout waiting for system to become ready')
+    return False
+```
+
+### Kubernetes Liveness/Readiness Probes
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: docrawl
+spec:
+  containers:
+  - name: docrawl
+    image: docrawl:latest
+    readinessProbe:
+      httpGet:
+        path: /api/health/ready
+        port: 8000
+      initialDelaySeconds: 10
+      periodSeconds: 5
+    livenessProbe:
+      httpGet:
+        path: /api/health/ready
+        port: 8000
+      initialDelaySeconds: 30
+      periodSeconds: 10
+```
+
+### Docker Compose Health Check
+
+```yaml
+services:
+  docrawl:
+    image: docrawl:latest
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+```
+
+## Related Endpoints
+
+- [List Providers](/api-reference/endpoints/providers) - Check provider configuration
+- [List Models](/api-reference/endpoints/models) - Verify model availability
+- [App Info](/api-reference/endpoints/health#app-info) - Get application version and metadata
+
+---
+
+## App Info
+
+<api-endpoint>
+  GET /api/info
+</api-endpoint>
+
+Get application identity metadata including version, repository, and development information.
+
+### Response
+
+<ResponseField name="name" type="string">
+  Application name: `Docrawl`.
+</ResponseField>
+
+<ResponseField name="version" type="string">
+  Current API version.
+</ResponseField>
+
+<ResponseField name="repo" type="string">
+  GitHub repository URL.
+</ResponseField>
+
+<ResponseField name="author" type="string">
+  Project author/maintainer.
+</ResponseField>
+
+<ResponseField name="models_used" type="array">
+  List of AI models used during development.
+</ResponseField>
+
+### Example Request
+
+```bash
+curl https://api.docrawl.com/api/info
+```
+
+### Example Response
+
+```json
+{
+  "name": "Docrawl",
+  "version": "1.0.0",
+  "repo": "https://github.com/plater7/docrawl",
+  "author": "plater7",
+  "models_used": [
+    "qwen3-coder:free",
+    "glm-4.7-free",
+    "claude-sonnet-4-6"
+  ]
+}
+```
+
+## List Converters
+
+<api-endpoint>
+  GET /api/converters
+</api-endpoint>
+
+List available HTML to Markdown converter plugins. This endpoint is rate-limited to 60 requests per minute.
+
+### Response
+
+<ResponseField name="converters" type="array">
+  Array of available converter plugins.
+  
+  <Expandable title="Converter Object">
+    <ResponseField name="name" type="string">
+      Converter plugin name. Use this value in the `converter` field when creating jobs.
+    </ResponseField>
+    
+    <ResponseField name="supports_tables" type="boolean">
+      Whether the converter supports HTML table conversion.
+    </ResponseField>
+    
+    <ResponseField name="supports_code_blocks" type="boolean">
+      Whether the converter supports code block syntax highlighting.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="default" type="string">
+  Default converter used when none is specified: `markdownify`.
+</ResponseField>
+
+### Example Request
+
+```bash
+curl https://api.docrawl.com/api/converters
+```
+
+### Example Response
+
+```json
+{
+  "converters": [
+    {
+      "name": "markdownify",
+      "supports_tables": true,
+      "supports_code_blocks": true
+    },
+    {
+      "name": "html2text",
+      "supports_tables": false,
+      "supports_code_blocks": true
+    },
+    {
+      "name": "turndown",
+      "supports_tables": true,
+      "supports_code_blocks": true
+    }
+  ],
+  "default": "markdownify"
+}
+```
+
+### Usage in Job Requests
+
+```bash
+curl -X POST https://api.docrawl.com/api/jobs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://docs.example.com",
+    "converter": "markdownify",
+    "crawl_model": "qwen3-coder:free",
+    "pipeline_model": "qwen3-coder:free",
+    "reasoning_model": "glm-4.7-free"
+  }'
+```

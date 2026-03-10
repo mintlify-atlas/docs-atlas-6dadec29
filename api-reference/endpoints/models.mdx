@@ -1,0 +1,212 @@
+---
+title: 'Models'
+description: 'List available LLM models'
+---
+
+## List Models
+
+<api-endpoint>
+  GET /api/models
+</api-endpoint>
+
+List all available LLM models across configured providers. You can optionally filter by provider.
+
+### Query Parameters
+
+<ParamField query="provider" type="string" default={null}>
+  Filter models by provider: `ollama`, `openrouter`, `opencode`, or `lmstudio`.
+  
+  If not specified, returns models from all configured providers.
+</ParamField>
+
+### Response
+
+Returns an array of model objects.
+
+<ResponseField name="name" type="string">
+  Model identifier/name. Use this value in job requests.
+  
+  Examples:
+  - Ollama: `qwen3-coder:free`, `llama3.2:latest`
+  - OpenRouter: `anthropic/claude-sonnet-4-6`, `google/gemini-pro`
+  - OpenCode: `opencode/gpt-4`
+</ResponseField>
+
+<ResponseField name="size" type="integer">
+  Model size in bytes (if available). Only provided for locally downloaded models (Ollama, LM Studio).
+</ResponseField>
+
+<ResponseField name="provider" type="string">
+  Provider that hosts this model: `ollama`, `openrouter`, `opencode`, or `lmstudio`.
+</ResponseField>
+
+<ResponseField name="is_free" type="boolean">
+  Whether the model is free to use.
+  
+  - Local models (Ollama, LM Studio): Always `true`
+  - Cloud models (OpenRouter): Depends on the model pricing
+</ResponseField>
+
+### Example Requests
+
+#### List all models
+
+```bash
+curl https://api.docrawl.com/api/models
+```
+
+#### Filter by provider
+
+```bash
+# List only Ollama models
+curl https://api.docrawl.com/api/models?provider=ollama
+
+# List only OpenRouter models
+curl https://api.docrawl.com/api/models?provider=openrouter
+```
+
+### Example Response
+
+```json
+[
+  {
+    "name": "qwen3-coder:free",
+    "size": 4871384064,
+    "provider": "ollama",
+    "is_free": true
+  },
+  {
+    "name": "llama3.2:latest",
+    "size": 2063288320,
+    "provider": "ollama",
+    "is_free": true
+  },
+  {
+    "name": "glm-4.7-free",
+    "size": null,
+    "provider": "openrouter",
+    "is_free": true
+  },
+  {
+    "name": "anthropic/claude-sonnet-4-6",
+    "size": null,
+    "provider": "openrouter",
+    "is_free": false
+  },
+  {
+    "name": "google/gemini-pro-1.5",
+    "size": null,
+    "provider": "openrouter",
+    "is_free": false
+  }
+]
+```
+
+## Model Selection Guide
+
+### Model Types
+
+Docrawl uses three types of models for different tasks:
+
+1. **Crawl Model** (`crawl_model`)
+   - Decides which links to follow during crawling
+   - Analyzes page structure and navigation patterns
+   - Recommended: Fast, lightweight models
+
+2. **Pipeline Model** (`pipeline_model`)
+   - Processes and converts HTML to Markdown
+   - Extracts relevant content from documentation pages
+   - Recommended: Balanced models with good accuracy
+
+3. **Reasoning Model** (`reasoning_model`)
+   - Performs complex analysis and decision-making
+   - Handles edge cases and content classification
+   - Recommended: More capable models with strong reasoning
+
+### Recommended Models
+
+#### For Local/Free Usage
+
+```json
+{
+  "crawl_model": "qwen3-coder:free",
+  "pipeline_model": "qwen3-coder:free",
+  "reasoning_model": "glm-4.7-free"
+}
+```
+
+#### For Best Quality (OpenRouter)
+
+```json
+{
+  "crawl_model": "google/gemini-flash-1.5",
+  "pipeline_model": "anthropic/claude-sonnet-4-6",
+  "reasoning_model": "anthropic/claude-sonnet-4-6"
+}
+```
+
+#### For Balanced Performance
+
+```json
+{
+  "crawl_model": "qwen3-coder:free",
+  "pipeline_model": "llama3.2:latest",
+  "reasoning_model": "anthropic/claude-haiku-3.5"
+}
+```
+
+## Provider-Specific Notes
+
+### Ollama Models
+
+- Downloaded and run locally on your machine
+- No API costs, but requires local compute resources
+- Download models using: `ollama pull <model-name>`
+- List downloaded models: `ollama list`
+
+```bash
+# Download recommended models
+ollama pull qwen3-coder:free
+ollama pull llama3.2:latest
+```
+
+### OpenRouter Models
+
+- Cloud-based, requires API key and has usage costs
+- Access to latest commercial models (GPT-4, Claude, etc.)
+- Some free models available (check `is_free` field)
+- Pricing varies by model - check https://openrouter.ai/models
+
+### LM Studio Models
+
+- Downloaded through LM Studio UI
+- Run locally with optimized performance
+- Supports GGUF format models
+- Start the local server before using
+
+## Model Availability
+
+Model availability depends on:
+
+1. **Provider Configuration**: The provider must be configured (API keys set, service running)
+2. **Local Downloads**: For Ollama/LM Studio, models must be downloaded
+3. **API Access**: For OpenRouter, your API key must have access to the model
+
+Check provider status using the [Providers endpoint](/api-reference/endpoints/providers).
+
+## Error Responses
+
+<ResponseField name="500 Internal Server Error">
+  Failed to fetch models from provider.
+  
+  Common causes:
+  - Provider service not running (Ollama, LM Studio)
+  - Invalid API key (OpenRouter, OpenCode)
+  - Network connectivity issues
+</ResponseField>
+
+## Related Endpoints
+
+- [List Providers](/api-reference/endpoints/providers) - Check provider configuration
+- [Create Job](/api-reference/endpoints/jobs#create-job) - Use models in crawl jobs
+- [Health Check](/api-reference/endpoints/health) - Verify provider connectivity

@@ -1,0 +1,291 @@
+---
+title: 'UI Themes'
+description: 'Customize the Docrawl interface with Synthwave, Terminal, or Basic themes'
+---
+
+Docrawl includes three visual themes for the web UI. Theme selection persists across sessions using browser `localStorage`.
+
+## Available Themes
+
+<CardGroup cols={3}>
+  <Card title="Synthwave" icon="waveform">
+    Neon retro-futuristic aesthetic with magenta/cyan colors
+  </Card>
+  <Card title="Terminal" icon="terminal">
+    Classic green CRT phosphor with scanlines and vignette
+  </Card>
+  <Card title="Basic" icon="square">
+    Clean, minimal dark UI for focused work
+  </Card>
+</CardGroup>
+
+## Theme Overview
+
+### Synthwave (Default)
+
+<Note>
+This is the default theme that loads when you first access Docrawl.
+</Note>
+
+**Visual Style:**
+- Neon magenta (`#ff00ff`) and cyan (`#00ffff`) accent colors
+- Deep space background (`#0a0a12`)
+- Orbitron font for headings (geometric, futuristic)
+- VT323 font for body text (classic terminal)
+- Subtle scanline effect and radial gradient overlay
+- Glow effects on interactive elements
+
+**Perfect For:**
+- Retro computing enthusiasts
+- Developers who love 80s aesthetics
+- Late-night coding sessions
+- Screenshot-worthy dashboards
+
+**Color Palette:**
+```css
+--bg-deep: #0a0a12
+--bg-panel: #12121f
+--accent-magenta: #ff00ff
+--accent-cyan: #00ffff
+--accent-amber: #ff6b00
+--accent-green: #00ff88
+--glow-magenta: 0 0 10px #ff00ff, 0 0 20px #ff00ff40
+```
+
+### Terminal
+
+**Visual Style:**
+- Classic CRT green phosphor (`#00ff00`)
+- Black terminal background
+- IBM Plex Mono font (monospace, technical)
+- Prominent scanline effect
+- Vignette (darkened corners)
+- High contrast for readability
+- Amber accent for warnings (`#ffaa00`)
+
+**Perfect For:**
+- Terminal purists
+- Developers who prefer classic Unix aesthetics
+- Reducing eye strain with lower brightness
+- Nostalgic computing experience
+
+**Visual Effects:**
+- Scanlines simulate CRT display
+- Vignette effect darkens edges
+- Text glow mimics phosphor persistence
+
+### Basic
+
+**Visual Style:**
+- Clean dark UI without decorative effects
+- Blue accent color (`#3b82f6`)
+- Standard system fonts
+- No scanlines or glow effects
+- Minimal distractions
+- Modern flat design
+
+**Perfect For:**
+- Professional environments
+- Users who prefer minimal design
+- Accessibility and clarity
+- Focus on content over aesthetics
+
+**Design Philosophy:**
+- Function over form
+- Maximum readability
+- Reduced visual noise
+- Standard UI patterns
+
+## Selecting a Theme
+
+### Via UI Selector
+
+1. Open Docrawl in your browser: `http://localhost:8002`
+2. Look for the theme dropdown in the header
+3. Select your preferred theme:
+   - **SYNTHWAVE**
+   - **TERMINAL**
+   - **BASIC**
+4. Theme applies immediately and saves automatically
+
+<Note>
+The theme selector is typically located in the top-right of the interface.
+</Note>
+
+### Via Browser Console
+
+For programmatic control:
+
+```javascript
+// Set theme
+localStorage.setItem('docrawl-theme', 'terminal');
+document.body.className = 'theme-terminal';
+
+// Get current theme
+const currentTheme = localStorage.getItem('docrawl-theme');
+console.log(currentTheme);
+
+// Reset to default
+localStorage.removeItem('docrawl-theme');
+location.reload();
+```
+
+## How Theme Persistence Works
+
+Themes are stored in browser `localStorage` with the key `docrawl-theme`.
+
+### Implementation
+
+From `src/ui/index.html`:
+
+```javascript
+// Theme management
+const themeSelect = document.getElementById('themeSelect');
+const savedTheme = localStorage.getItem('docrawl-theme') || 'synthwave';
+document.body.className = `theme-${savedTheme}`;
+themeSelect.value = savedTheme;
+themeSelect.addEventListener('change', () => {
+    document.body.className = `theme-${themeSelect.value}`;
+    localStorage.setItem('docrawl-theme', themeSelect.value);
+});
+```
+
+### Storage Location
+
+- **Key**: `docrawl-theme`
+- **Values**: `synthwave`, `terminal`, or `basic`
+- **Scope**: Per origin (domain + port)
+
+### Clearing Theme Data
+
+```javascript
+localStorage.removeItem('docrawl-theme');
+```
+
+Or clear all Docrawl data:
+
+```javascript
+localStorage.clear();
+```
+
+## Theme Comparison
+
+| Feature | Synthwave | Terminal | Basic |
+|---------|-----------|----------|-------|
+| **Primary Color** | Magenta/Cyan | Green | Blue |
+| **Background** | Deep space | Black | Dark gray |
+| **Fonts** | Orbitron + VT323 | IBM Plex Mono | System fonts |
+| **Scanlines** | Subtle | Prominent | None |
+| **Glow Effects** | Yes | Yes | No |
+| **Vignette** | Subtle | Prominent | None |
+| **Contrast** | High | Very High | Medium |
+| **Eye Strain** | Low-Medium | Low | Low |
+
+## Customizing Themes
+
+Themes are defined in `src/ui/index.html` using CSS. To create a custom theme:
+
+### 1. Define CSS Variables
+
+```css
+.theme-custom {
+    --bg-deep: #your-color;
+    --bg-panel: #your-color;
+    --accent-primary: #your-color;
+    --text-primary: #your-color;
+    /* ... more variables */
+}
+```
+
+### 2. Add Theme Option
+
+Modify the theme selector:
+
+```html
+<select id="themeSelect">
+    <option value="synthwave">SYNTHWAVE</option>
+    <option value="terminal">TERMINAL</option>
+    <option value="basic">BASIC</option>
+    <option value="custom">CUSTOM</option>
+</select>
+```
+
+### 3. Rebuild Docker Image
+
+```bash
+docker compose up --build
+```
+
+<Warning>
+Custom themes require modifying source files and rebuilding the Docker image. Changes will be lost on updates unless you fork the repository.
+</Warning>
+
+## Accessibility Considerations
+
+### Color Contrast
+
+All themes meet WCAG AA standards for color contrast:
+- **Synthwave**: High contrast text on dark backgrounds
+- **Terminal**: Maximum contrast (green on black)
+- **Basic**: Standard dark mode contrast ratios
+
+### Reduced Motion
+
+To disable animations for users with motion sensitivity, add to your browser:
+
+```css
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+```
+
+### Font Sizing
+
+Themes respect browser font size settings. Use browser zoom (Ctrl/Cmd +/-) to adjust.
+
+## Theme Screenshots
+
+<Note>
+Theme screenshots are best experienced by running Docrawl locally and switching between themes in real-time.
+</Note>
+
+### Visual Elements Affected
+
+- **Headers** - Logo and navigation
+- **Forms** - Input fields, dropdowns, buttons
+- **Progress indicators** - Phase banners, progress bars
+- **Log output** - Event stream display
+- **Job history** - Completed job cards
+- **Status badges** - Success/error/warning indicators
+
+## FAQ
+
+<Accordion title="Can I use different themes in different browser tabs?">
+  No, themes are stored per-origin in localStorage. All tabs of the same Docrawl instance share the same theme. To use different themes, run multiple Docrawl instances on different ports.
+</Accordion>
+
+<Accordion title="Why doesn't my theme persist after restarting Docker?">
+  Themes are stored in browser localStorage, not in Docker. The theme should persist across Docker restarts as long as you use the same browser. Clear your browser cache/localStorage if experiencing issues.
+</Accordion>
+
+<Accordion title="Can I set a default theme for all users?">
+  Yes, modify the default in `src/ui/index.html`:
+  
+  ```javascript
+  const savedTheme = localStorage.getItem('docrawl-theme') || 'terminal';
+  ```
+  
+  Change `'synthwave'` to your preferred default, then rebuild the Docker image.
+</Accordion>
+
+<Accordion title="Are themes mobile-responsive?">
+  Yes, all themes include responsive CSS and work on mobile devices. The layout adapts to smaller screens while preserving the visual theme.
+</Accordion>
+
+## Related
+
+- [Docker Deployment](/guides/docker-deployment) - Deploy Docrawl with your preferred theme
+- [Configuration](/guides/configuration) - Customize job behavior

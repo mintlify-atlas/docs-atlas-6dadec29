@@ -1,0 +1,153 @@
+---
+title: 'Providers'
+description: 'List available LLM providers'
+---
+
+## List Providers
+
+<api-endpoint>
+  GET /api/providers
+</api-endpoint>
+
+List all available LLM providers and their configuration status.
+
+### Response
+
+<ResponseField name="providers" type="array">
+  Array of provider objects.
+  
+  <Expandable title="Provider Object">
+    <ResponseField name="id" type="string">
+      Provider identifier: `ollama`, `openrouter`, `opencode`, or `lmstudio`.
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      Human-readable provider name.
+    </ResponseField>
+    
+    <ResponseField name="configured" type="boolean">
+      Whether the provider is configured and ready to use.
+      
+      - `ollama`: Always true (local service)
+      - `openrouter`: True if `OPENROUTER_API_KEY` environment variable is set
+      - `opencode`: True if `OPENCODE_API_KEY` environment variable is set
+      - `lmstudio`: True if LM Studio is running locally
+    </ResponseField>
+    
+    <ResponseField name="requires_api_key" type="boolean">
+      Whether the provider requires an API key for authentication.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Request
+
+```bash
+curl https://api.docrawl.com/api/providers
+```
+
+### Example Response
+
+```json
+{
+  "providers": [
+    {
+      "id": "ollama",
+      "name": "Ollama",
+      "configured": true,
+      "requires_api_key": false
+    },
+    {
+      "id": "openrouter",
+      "name": "Openrouter",
+      "configured": true,
+      "requires_api_key": true
+    },
+    {
+      "id": "opencode",
+      "name": "Opencode",
+      "configured": false,
+      "requires_api_key": true
+    },
+    {
+      "id": "lmstudio",
+      "name": "Lmstudio",
+      "configured": true,
+      "requires_api_key": false
+    }
+  ]
+}
+```
+
+## Provider Details
+
+### Ollama
+
+Local LLM runtime that runs models on your machine.
+
+- **ID**: `ollama`
+- **Requires API Key**: No
+- **Configuration**: Requires Ollama to be running locally (default: `http://localhost:11434`)
+- **Models**: Download models using `ollama pull <model-name>`
+
+### OpenRouter
+
+Cloud-based LLM API aggregator providing access to multiple model providers.
+
+- **ID**: `openrouter`
+- **Requires API Key**: Yes
+- **Configuration**: Set `OPENROUTER_API_KEY` environment variable
+- **Website**: https://openrouter.ai
+- **Models**: Access to GPT-4, Claude, Llama, and many others
+
+### OpenCode
+
+Specialized code generation and analysis LLM service.
+
+- **ID**: `opencode`
+- **Requires API Key**: Yes
+- **Configuration**: Set `OPENCODE_API_KEY` environment variable
+- **Models**: Optimized for code-related tasks
+
+### LM Studio
+
+Local LLM runtime with a user-friendly interface.
+
+- **ID**: `lmstudio`
+- **Requires API Key**: No (optional Bearer token supported)
+- **Configuration**: Requires LM Studio to be running locally (default: `http://localhost:1234`)
+- **Website**: https://lmstudio.ai
+- **Models**: Download models through LM Studio UI
+
+## Configuration
+
+To configure API-based providers, set the appropriate environment variables:
+
+```bash
+# OpenRouter
+export OPENROUTER_API_KEY="sk-or-v1-..."
+
+# OpenCode
+export OPENCODE_API_KEY="..."
+
+# Optional: LM Studio Bearer Token
+export LMSTUDIO_API_KEY="..."
+```
+
+For local providers (Ollama, LM Studio), ensure the service is running:
+
+```bash
+# Start Ollama
+ollama serve
+
+# Verify Ollama is running
+curl http://localhost:11434/api/tags
+
+# Start LM Studio
+# Use the LM Studio application and start the local server
+```
+
+## Related Endpoints
+
+- [List Models](/api-reference/endpoints/models) - Get available models for each provider
+- [Health Check](/api-reference/endpoints/health) - Verify provider connectivity

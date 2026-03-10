@@ -1,0 +1,399 @@
+---
+title: 'Installation'
+description: 'Get Docrawl up and running on your machine'
+---
+
+Docrawl can be installed using Docker (recommended) or as a local Python application. This guide covers both installation methods, system requirements, and configuration.
+
+## System Requirements
+
+Before installing Docrawl, ensure your system meets these requirements:
+
+| Requirement | Minimum | Recommended |
+|-------------|---------|-------------|
+| **RAM** | 4GB | 8GB+ |
+| **CPU** | 2 cores | 4+ cores |
+| **Disk** | 5GB free | 20GB+ free |
+| **Docker** | 20.10+ | Latest |
+| **Python** | 3.12 | 3.12+ |
+| **Ollama** | Optional | 1+ model pulled |
+
+<Note>
+Without Ollama, you'll need API keys for OpenRouter or OpenCode to use LLM features.
+</Note>
+
+## Docker Installation (Recommended)
+
+Docker is the easiest way to get started with Docrawl. All dependencies, including Playwright and Chromium, are bundled in the container.
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/plater7/docrawl.git
+    cd docrawl
+    ```
+  </Step>
+
+  <Step title="Run the setup script">
+    The setup script verifies prerequisites, checks system resources, and creates necessary directories:
+    
+    ```bash
+    ./setup.sh
+    ```
+    
+    The script will check:
+    - Docker and Docker Compose installation
+    - Docker daemon status
+    - Available memory (minimum 4GB)
+    - Available disk space (minimum 5GB)
+    - Ollama installation and models (optional)
+    
+    It will also create:
+    - `./data` directory for crawl outputs
+    - `.env` file from `.env.example` if it doesn't exist
+  </Step>
+
+  <Step title="Configure environment variables">
+    Edit the `.env` file to add your API keys (if not using Ollama):
+    
+    ```bash
+    # For OpenRouter (has free models available)
+    OPENROUTER_API_KEY=sk-or-...
+    
+    # For OpenCode
+    OPENCODE_API_KEY=...
+    
+    # For LM Studio (optional)
+    LMSTUDIO_URL=http://localhost:1234/v1
+    LMSTUDIO_API_KEY=
+    ```
+    
+    <Tip>
+    Leave API keys empty if you're using Ollama for local LLM inference.
+    </Tip>
+  </Step>
+
+  <Step title="Start Docrawl">
+    Build and start the Docker container:
+    
+    ```bash
+    docker compose up --build
+    ```
+    
+    <Warning>
+    The first build downloads Playwright Chromium (~200MB). Ensure you have internet connectivity.
+    </Warning>
+    
+    For detached mode (runs in background):
+    
+    ```bash
+    docker compose up --build -d
+    ```
+  </Step>
+
+  <Step title="Verify installation">
+    Open your browser and navigate to:
+    
+    ```
+    http://localhost:8002
+    ```
+    
+    You should see the Docrawl dashboard. You can also check the health endpoint:
+    
+    ```bash
+    curl http://localhost:8002/api/health/ready
+    ```
+  </Step>
+</Steps>
+
+### Docker Configuration
+
+The `docker-compose.yml` includes several important configurations:
+
+- **Port binding**: `127.0.0.1:8002:8002` (localhost-only access)
+- **Volume mount**: `./data:/data` (persistent storage for crawl outputs)
+- **Shared memory**: `2GB` for Playwright (prevents crashes on large pages)
+- **Memory limits**: 4GB max, 2GB reserved
+- **Health checks**: Automatic readiness monitoring
+- **Host access**: `host.docker.internal` for accessing local Ollama
+
+## Local Python Installation
+
+For development or if you prefer not to use Docker, you can install Docrawl directly.
+
+<Steps>
+  <Step title="Install system dependencies">
+    <CodeGroup>
+      ```bash Ubuntu/Debian
+      sudo apt update
+      sudo apt install -y python3.12 python3.12-venv python3-pip
+      ```
+      
+      ```bash macOS
+      brew install python@3.12
+      ```
+      
+      ```bash Arch Linux
+      sudo pacman -S python
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Clone and setup">
+    ```bash
+    git clone https://github.com/plater7/docrawl.git
+    cd docrawl
+    
+    # Create virtual environment
+    python3.12 -m venv venv
+    source venv/bin/activate  # On Windows: venv\Scripts\activate
+    
+    # Install dependencies
+    pip install -r requirements.txt
+    
+    # Install Playwright browsers
+    playwright install chromium
+    ```
+  </Step>
+
+  <Step title="Configure environment">
+    ```bash
+    cp .env.example .env
+    # Edit .env with your API keys
+    ```
+  </Step>
+
+  <Step title="Create data directory">
+    ```bash
+    mkdir -p data
+    chmod 755 data
+    ```
+  </Step>
+
+  <Step title="Run the application">
+    ```bash
+    uvicorn src.main:app --host 0.0.0.0 --port 8002
+    ```
+    
+    Or use the development server with auto-reload:
+    
+    ```bash
+    uvicorn src.main:app --host 0.0.0.0 --port 8002 --reload
+    ```
+  </Step>
+</Steps>
+
+## Ollama Setup (Optional)
+
+Ollama provides free, local LLM inference. It's recommended for privacy and cost savings.
+
+<Steps>
+  <Step title="Install Ollama">
+    <CodeGroup>
+      ```bash Linux/macOS
+      curl -fsSL https://ollama.com/install.sh | sh
+      ```
+      
+      ```bash Windows
+      # Download installer from https://ollama.ai
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Start Ollama service">
+    ```bash
+    ollama serve
+    ```
+    
+    <Note>
+    Ollama runs on `http://localhost:11434` by default. When using Docker, Docrawl automatically connects via `http://host.docker.internal:11434`.
+    </Note>
+  </Step>
+
+  <Step title="Pull recommended models">
+    Docrawl uses different models for different tasks:
+    
+    ```bash
+    # Crawl model (fast URL discovery and filtering)
+    ollama pull mistral:7b
+    
+    # Pipeline model (markdown cleanup)
+    ollama pull qwen2.5:14b
+    
+    # Reasoning model (complex analysis - optional)
+    ollama pull deepseek-r1:7b
+    ```
+    
+    <Tip>
+    You can use different providers for different roles. For example, use Ollama for crawl and OpenRouter for pipeline to balance speed and quality.
+    </Tip>
+  </Step>
+
+  <Step title="Verify models">
+    ```bash
+    ollama list
+    ```
+    
+    You should see your pulled models listed.
+  </Step>
+</Steps>
+
+## Environment Variables
+
+Docrawl's behavior is controlled through environment variables in the `.env` file:
+
+### LLM Provider Configuration
+
+```bash
+# Ollama (Local)
+OLLAMA_URL=http://localhost:11434
+
+# OpenRouter (Cloud - has free models)
+OPENROUTER_API_KEY=sk-or-...
+
+# OpenCode (Cloud)
+OPENCODE_API_KEY=...
+
+# LM Studio (Local - OpenAI compatible)
+LMSTUDIO_URL=http://localhost:1234/v1
+LMSTUDIO_API_KEY=
+```
+
+### Security Settings
+
+```bash
+# API key for endpoint authentication (optional)
+# Generate with: openssl rand -hex 32
+API_KEY=
+
+# Allowed CORS origins (comma-separated)
+CORS_ORIGINS=https://myapp.example.com,http://localhost:3000
+```
+
+### Performance Tuning
+
+```bash
+# Maximum concurrent crawl jobs
+MAX_CONCURRENT_JOBS=5
+
+# Log level for debugging
+LOG_LEVEL=INFO  # Options: DEBUG, INFO, WARNING, ERROR
+```
+
+### Cloudflare Tunnel (Optional)
+
+```bash
+# Expose to internet via Cloudflare Tunnel
+CLOUDFLARE_TUNNEL_TOKEN=
+```
+
+<Note>
+See the [Docker Deployment Guide](/guides/docker-deployment) for instructions on exposing Docrawl to the internet using Cloudflare Tunnel and Workers.
+</Note>
+
+## Verification Steps
+
+After installation, verify everything is working correctly:
+
+<Steps>
+  <Step title="Check API health">
+    ```bash
+    curl http://localhost:8002/api/health/ready
+    ```
+    
+    Expected response:
+    ```json
+    {
+      "status": "ready",
+      "ollama": "connected",
+      "disk_space": "ok",
+      "permissions": "ok"
+    }
+    ```
+  </Step>
+
+  <Step title="Check available providers">
+    ```bash
+    curl http://localhost:8002/api/providers
+    ```
+    
+    This shows which LLM providers are configured and available.
+  </Step>
+
+  <Step title="List available models">
+    ```bash
+    # For Ollama
+    curl http://localhost:8002/api/models?provider=ollama
+    
+    # For OpenRouter
+    curl http://localhost:8002/api/models?provider=openrouter
+    ```
+  </Step>
+
+  <Step title="Run a test crawl">
+    Open the dashboard at `http://localhost:8002` and try crawling a small documentation site to verify everything works end-to-end.
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### Docker daemon not running
+
+```bash
+# Linux
+sudo systemctl start docker
+
+# macOS/Windows
+# Start Docker Desktop application
+```
+
+### Memory issues
+
+If you encounter out-of-memory errors:
+
+1. Increase Docker memory limit in Docker Desktop settings (recommended: 4GB+)
+2. Reduce `MAX_CONCURRENT_JOBS` in `.env`
+3. Close other memory-intensive applications
+
+### Ollama connection failed
+
+When using Docker, ensure:
+
+```bash
+# Test Ollama from host
+curl http://localhost:11434/api/tags
+
+# From Docker, Ollama is accessed via host.docker.internal
+# This is configured automatically in docker-compose.yml
+```
+
+### Playwright installation issues
+
+```bash
+# Reinstall Playwright browsers
+playwright install --force chromium
+
+# Check Playwright
+playwright --version
+```
+
+### Permission denied on ./data directory
+
+```bash
+chmod 755 ./data
+# Or change ownership
+sudo chown -R $USER:$USER ./data
+```
+
+## Next Steps
+
+Now that Docrawl is installed, learn how to:
+
+- [Configure crawl settings](/guides/configuration)
+- [Use the API](/api-reference/endpoints/jobs)
+- [Select and configure LLM models](/guides/llm-providers)
+- [Deploy to production](/guides/docker-deployment)
+
+<Tip>
+Join the community on GitHub for support and to share your experiences: [github.com/plater7/docrawl](https://github.com/plater7/docrawl)
+</Tip>

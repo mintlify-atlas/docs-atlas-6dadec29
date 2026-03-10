@@ -1,0 +1,230 @@
+---
+title: Contributing to Docrawl
+description: Guidelines for contributing code, documentation, and bug reports to the Docrawl project
+icon: code-pull-request
+---
+
+Thank you for your interest in contributing to Docrawl! This guide will help you get started with development setup, coding standards, and the pull request process.
+
+<Note>
+  AI-assisted code is welcome with human review. See the [changelog](/advanced/changelog) footer for attribution guidelines.
+</Note>
+
+## Getting Started
+
+<Steps>
+  <Step title="Fork and clone the repository">
+    ```bash
+    git clone https://github.com/<your-username>/docrawl.git
+    cd docrawl
+    ```
+  </Step>
+
+  <Step title="Create a feature branch">
+    ```bash
+    git checkout -b feat/my-feature
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    ```bash
+    pip install -r requirements.txt
+    ```
+  </Step>
+
+  <Step title="(Optional) Install Playwright for integration tests">
+    ```bash
+    playwright install chromium
+    ```
+  </Step>
+</Steps>
+
+## Development Setup
+
+<CodeGroup>
+
+```bash Local Development
+# Run the API server with hot reload
+uvicorn src.main:app --host 0.0.0.0 --port 8002 --reload
+```
+
+```bash Docker Development
+# Build and run with Docker Compose
+docker compose up --build
+```
+
+```bash Run Tests
+# Run tests with coverage report
+pytest --cov=src --cov-report=term-missing
+```
+
+</CodeGroup>
+
+### Pre-commit Hooks
+
+The project uses [pre-commit](https://pre-commit.com/) with `ruff` for linting and formatting:
+
+```bash
+pip install pre-commit
+pre-commit install
+
+# Manually check all files:
+pre-commit run --all-files
+```
+
+## Conventional Commits
+
+All commits must follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:
+
+```
+<type>(optional scope): <short description>
+```
+
+### Allowed Types
+
+| Type | When to Use |
+|------|-------------|
+| `feat` | New functionality |
+| `fix` | Bug fix |
+| `docs` | Documentation changes only |
+| `chore` | Maintenance tasks, dependencies, CI |
+| `refactor` | Code refactoring without behavior change |
+| `test` | Add or fix tests |
+| `perf` | Performance improvement |
+
+### Examples
+
+```bash
+feat(crawler): add sitemap index support
+fix(llm): handle timeout in chunk cleanup
+docs(readme): add multi-provider configuration section
+chore(ci): remove unnecessary Playwright install in test workflow
+test(filter): add tests for language variant filtering
+```
+
+### Commit Rules
+
+- Description in **English**, imperative mood, no period at the end
+- Maximum 72 characters in the first line
+- Use `BREAKING CHANGE:` in the body if the change breaks compatibility
+- Reference issues at the end of the body: `Closes #123`
+
+<Note>
+  Sign your commits with `git commit -s` to add your Signed-off-by line.
+</Note>
+
+## Coding Standards
+
+- **Python 3.12** with type hints
+- **async/await** for all I/O operations
+- **Pydantic** for data validation
+- Use the `logging` module, never `print()`
+- Keep it simple: avoid unnecessary abstractions
+
+### Code Quality Checks
+
+<CodeGroup>
+
+```bash Linting
+# Check for linting errors
+ruff check src/ tests/
+```
+
+```bash Formatting
+# Check code formatting
+ruff format --check src/ tests/
+
+# Auto-format code
+ruff format src/ tests/
+```
+
+```bash Type Checking
+# Run type checking (if mypy is configured)
+mypy src/
+```
+
+</CodeGroup>
+
+## Pull Request Process
+
+<Steps>
+  <Step title="Ensure tests pass">
+    ```bash
+    pytest
+    ```
+  </Step>
+
+  <Step title="Verify linting and formatting">
+    ```bash
+    ruff check src/ tests/
+    ruff format --check src/ tests/
+    ```
+  </Step>
+
+  <Step title="Update documentation">
+    Update relevant docs if your change affects user-facing behavior or APIs.
+  </Step>
+
+  <Step title="Complete the PR template">
+    Fill out the pull request template with details about your changes.
+  </Step>
+
+  <Step title="Request review">
+    Request review from [@plater7](https://github.com/plater7) or other maintainers.
+  </Step>
+</Steps>
+
+## Reporting Issues
+
+### Bug Reports
+
+Use the **Bug Report** template and include:
+- Clear description of the issue
+- Steps to reproduce
+- Expected vs actual behavior
+- Environment details (OS, Python version, Docker version)
+- Relevant logs or error messages
+
+### Feature Requests
+
+Use the **Feature Request** template and describe:
+- The problem you're trying to solve
+- Your proposed solution
+- Any alternative solutions you've considered
+- Additional context or screenshots
+
+### Security Issues
+
+For security vulnerabilities, see [SECURITY.md](https://github.com/plater7/docrawl/blob/main/SECURITY.md) for responsible disclosure guidelines.
+
+<Note>
+  Do **not** open public issues for security vulnerabilities.
+</Note>
+
+## Code of Conduct
+
+- Be respectful to all contributors
+- Write clear, descriptive commit messages
+- Keep pull requests focused and small
+- Respond to feedback constructively
+
+## Getting Help
+
+If you have questions about contributing:
+
+- Check the [documentation](https://docs.docrawl.dev)
+- Open a [discussion](https://github.com/plater7/docrawl/discussions)
+- Join our community channels (if available)
+
+## Development Resources
+
+- [FastAPI Documentation](https://fastapi.tiangolo.com/)
+- [Playwright for Python](https://playwright.dev/python/)
+- [Pydantic Documentation](https://docs.pydantic.dev/)
+- [pytest Documentation](https://docs.pytest.org/)
+
+---
+
+<Card title="Next Steps" icon="rocket" href="/advanced/testing">
+  Learn how to write and run tests for Docrawl
+</Card>

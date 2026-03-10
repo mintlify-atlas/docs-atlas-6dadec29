@@ -1,0 +1,230 @@
+---
+title: Changelog
+description: Complete version history and release notes for Docrawl
+icon: clock-rotate-left
+---
+
+All notable changes to this project are documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+<Note>
+  This project uses AI-assisted development with human review. See attribution details at the bottom of this page.
+</Note>
+
+## v1.0.0 - Unreleased
+
+<Accordion title="v1.0.0 - Unreleased">
+
+### Fixed
+
+- **fix(playwright): use async context managers to prevent browser resource leaks** — [#150](https://github.com/plater7/docrawl/pull/150)
+
+</Accordion>
+
+---
+
+## v0.9.10 - 2026-03-04
+
+<Accordion title="v0.9.10 - 2026-03-04">
+
+### Added
+
+- **Pause/Resume** — `POST /jobs/{id}/pause` pauses the job after the current page; `POST /jobs/{id}/resume` resumes it in the same process; internal `asyncio.Event` (set=running, clear=paused) — [#131](https://github.com/plater7/docrawl/pull/131)
+- **State Checkpoint** — on pause, writes `{output_path}/.job_state.json` (atomic write) with completed/failed/pending URLs + serialized `JobRequest`
+- **Resume from State** — `POST /api/jobs/resume-from-state` creates a new job processing only pending URLs from checkpoint; path traversal protection (only under `/data`)
+- **Structured Output** — `output_format: "json"` returns `StructuredPage` with 7 types of `ContentBlock` (heading, paragraph, code, table, list, blockquote, image) — [#133](https://github.com/plater7/docrawl/pull/133)
+- **Pipeline Mode** — `use_pipeline_mode: true` enables producer/consumer with `asyncio.Queue(maxsize=20)` and backpressure; dedup + LLM cleanup in parallel with scraping — [#134](https://github.com/plater7/docrawl/pull/134)
+- **Converter Plugins** — `MarkdownConverter` Protocol + static registration; `GET /api/converters`; `converter` field in `JobRequest`; `MarkdownifyConverter` as default — [#135](https://github.com/plater7/docrawl/pull/135)
+- **Test Coverage** — coverage increased from ~55% to ~60%; new test files for exceptions, routes, llm/client, llm/cleanup, scraper/markdown, scraper/structured — [#146](https://github.com/plater7/docrawl/pull/146)
+- **feat(discovery): add sitemap_cache param to enable future sitemap caching** — [#152](https://github.com/plater7/docrawl/pull/152)
+- **feat(lmstudio): LM Studio local provider** — model listing, generation, health check, UI integration — [#154](https://github.com/plater7/docrawl/pull/154)
+- **feat(ui): send phase_change before scraping loop** — [#151](https://github.com/plater7/docrawl/pull/151)
+- **feat(ui): two-column layout - job history panel** — [#153](https://github.com/plater7/docrawl/pull/153)
+
+</Accordion>
+
+---
+
+## v0.9.9 - 2026-03-03
+
+<Accordion title="v0.9.9 - 2026-03-03">
+
+### Added
+
+- **Semantic Chunking** — `chunk_markdown()` divides by headings H1-H3 with `_mask_code_blocks()` to avoid splitting code blocks
+- **Cleanup Heuristics** — `classify_chunk()` introduces `CleanupLevel` (skip/cleanup/heavy); detects broken tables and LaTeX
+- **Dedup + Block Detection** — `content_hash()` for deduplicating repeated pages; `is_blocked_response()` detects bot-checks (Cloudflare, CAPTCHA); counters `pages_skipped` and `pages_blocked`
+- **Page Cache** — `PageCache` with 24h TTL and atomic writes; opt-in via `use_cache: false`; configurable `cache_dir` field
+- **Token Estimation** — `_estimate_tokens()` with different ratios for code (3.0), tables (3.5), and prose (4.0)
+- **API Version** — `X-API-Version: 0.9.9` header
+
+</Accordion>
+
+---
+
+## v0.9.8 - 2026-03-03
+
+<Accordion title="v0.9.8 - 2026-03-03">
+
+### Added
+
+- **Docker Hardening** — base image `python:3.12.9-slim-bookworm` pinned; no curl in runtime; healthcheck via `python -c urllib.request`
+- **PagePool** — pool of reusable Playwright pages (`asyncio.Queue`); env var `PAGE_POOL_SIZE`; opt-out via `use_page_pool: false`; initialized in FastAPI lifespan
+- **HTTP Fast-Path** — `fetch_html_fast()` tries plain HTTP before Playwright for static pages; opt-out via `use_http_fast_path: false`; `filter_sitemap_by_path` filters sitemap URLs to base subpath
+- **Parallel Discovery** — parallel BFS with `asyncio.gather` per depth level; env var `DISCOVERY_CONCURRENCY`
+- **Job TTL** — background cleanup of completed jobs; `JOB_TTL_SECONDS` env var; `asyncio.Lock` in `JobManager` for thread safety; `completed_at` field in `Job`
+
+</Accordion>
+
+---
+
+## v0.9.7 - 2026-02-27
+
+<Accordion title="v0.9.7 - 2026-02-27">
+
+### Added
+
+- **Structured Logging** — logs emitted as JSON (`timestamp`, `level`, `logger`, `message` + extra fields) — closes [#109](https://github.com/plater7/docrawl/issues/109)
+- **Token Tracking** — each Ollama call logs `prompt_tokens` and `completion_tokens` from response — closes [#105](https://github.com/plater7/docrawl/issues/105)
+- **API Versioning** — middleware adds `X-API-Version: 0.9.7` header to all responses — closes [#103](https://github.com/plater7/docrawl/issues/103)
+- **Docker Publish Workflow** — new `.github/workflows/docker-publish.yml` publishes image to GHCR on `v*` tag push — closes [#108](https://github.com/plater7/docrawl/issues/108)
+- **Pre-commit Hooks** — `.pre-commit-config.yaml` with `ruff` (lint + format) — closes [#106](https://github.com/plater7/docrawl/issues/106)
+- **Multi-provider docs** — README section with configuration instructions for Ollama, OpenRouter, and OpenCode — closes [#111](https://github.com/plater7/docrawl/issues/111)
+- **Conventional Commits** — documented in CONTRIBUTING.md with types, examples, and rules — closes [#107](https://github.com/plater7/docrawl/issues/107)
+
+### Fixed
+
+- **Health Check** — `/api/health/ready` returns HTTP 503 when LLM provider unavailable (was returning 200 with `ready: false`) — closes [#104](https://github.com/plater7/docrawl/issues/104)
+- **Error Sanitization** — global exception handler returns `{"error": "Internal server error"}` without exposing stack traces — closes [#113](https://github.com/plater7/docrawl/issues/113)
+- **CI optimization** — removed unnecessary Playwright installation in `test.yml` (browsers not required for unit tests) — closes [#112](https://github.com/plater7/docrawl/issues/112)
+
+### Changed
+
+- CONTRIBUTING.md standardized in Spanish with Conventional Commits section — closes [#110](https://github.com/plater7/docrawl/issues/110)
+
+</Accordion>
+
+---
+
+## v0.9.6b - 2026-02-26
+
+<Accordion title="v0.9.6b - 2026-02-26">
+
+### Fixed
+
+- **Footer always visible** — [#121](https://github.com/plater7/docrawl/pull/121) — `position: relative` was hiding footer below fold; changed to `position: fixed; bottom: 0` for permanent visibility across all 3 themes; semi-transparent background + `backdrop-filter: blur` for readability; `padding-bottom: 3rem` on `body` to prevent content overlap
+
+</Accordion>
+
+---
+
+## v0.9.0 - 2026-02-26
+
+<Warning>
+  **Security Release** — 15 vulnerabilities fixed. Upgrade recommended.
+</Warning>
+
+<Accordion title="v0.9.0 - 2026-02-26">
+
+### Security (15 vulnerabilities fixed)
+
+- **Path Traversal (CONS-001 / [#47](https://github.com/plater7/docrawl/issues/47))** — `output_path` validated against `/data` boundary via `Path.resolve()`
+- **Auth on all endpoints (CONS-002 / [#48](https://github.com/plater7/docrawl/issues/48))** — `X-Api-Key` middleware; dev-local mode if `API_KEY` unset
+- **Port 8002 bypass (CONS-003 / [#49](https://github.com/plater7/docrawl/issues/49))** — API key middleware covers all non-exempt paths
+- **Worker auth (CONS-004 / [#50](https://github.com/plater7/docrawl/issues/50))** — Cloudflare Worker validates `X-Api-Key` before proxying
+- **SSRF via Playwright (CONS-005 / [#51](https://github.com/plater7/docrawl/issues/51))** — `validate_url_not_ssrf()` in `PageScraper.get_html()`, `fetch_markdown_native()`, `fetch_markdown_proxy()`
+- **XSS via innerHTML (CONS-006 / [#52](https://github.com/plater7/docrawl/issues/52))** — Replaced all untrusted `innerHTML` with safe DOM API (`textContent`, `createElement`, `appendChild`)
+- **Rate limiting (CONS-007 / [#53](https://github.com/plater7/docrawl/issues/53))** — `slowapi` limiter: 10 req/min on `POST /api/jobs`; concurrent job cap via `MAX_CONCURRENT_JOBS`
+- **Prompt injection (CONS-012 / [#58](https://github.com/plater7/docrawl/issues/58))** — LLM prompts sanitized
+- **XXE in sitemap parser (CONS-018 / [#64](https://github.com/plater7/docrawl/issues/64))** — `defusedxml` replacing stdlib `xml.etree`
+- **SSRF via markdown proxy (CONS-019 / [#65](https://github.com/plater7/docrawl/issues/65))** — `validate_proxy_url` validator blocks non-HTTPS and private IPs
+- **Parameter limits (CONS-020 / [#66](https://github.com/plater7/docrawl/issues/66))** — Pydantic `Field` bounds on `delay_ms`, `max_concurrent`, `max_depth`, model name pattern
+- **Data exfiltration (CONS-021 / [#67](https://github.com/plater7/docrawl/issues/67))** — Warning banner when external provider selected
+- **Security headers (CONS-022 / [#68](https://github.com/plater7/docrawl/issues/68))** — `SecurityHeadersMiddleware`: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Content-Security-Policy`
+- **CORS (CONS-034 / [#80](https://github.com/plater7/docrawl/issues/80))** — `CORSMiddleware` with `CORS_ORIGINS` env var; default deny
+
+### Added
+
+- `src/utils/security.py` — shared `validate_url_not_ssrf()` utility
+- Concurrent job limit (`MAX_CONCURRENT_JOBS` env, default 5)
+- Rate limiter error handler (429 JSON response)
+
+### Tests
+
+- 41 new tests covering security validators, SSRF utility, job manager, and routes
+- Patch coverage raised from 11.57% to >70% on new code
+
+</Accordion>
+
+---
+
+## v0.8.5 - 2026-02-20
+
+<Accordion title="v0.8.5 - 2026-02-20">
+
+### Added
+
+- **UI Theme Selector** — Theme selector with `localStorage` persistence
+  - 🌈 **SYNTHWAVE** (default) — neon magenta/cyan, Orbitron + VT323
+  - 💚 **TERMINAL** — phosphor green CRT, IBM Plex Mono, scanlines, vignette
+  - ⚪ **BASIC** — clean, minimalist dark UI
+- **Smart Sitemap Sampling** — generic sub-sitemaps sampled (first 5) before downloading all; skipped if &lt;10% of URLs are relevant
+- **Regional Language Variants** — language filtering expanded with regional variants (`es-mx`, `en-au`, `fr-ca`, `de-at`, `zh-hk`, `pt-pt`, etc.)
+- **Cloudflare Setup Docs** — `docs/SETUP.md` with complete Tunnel + Workers VPC instructions
+- **Global Sitemap Timeout** — discovery limited to 360s to avoid timeouts on massive sitemaps
+- **Language-aware URL filtering** — if base URL has language prefix, excludes URLs without prefix (avoids false positives)
+
+### Fixed
+
+- **Path Prefix False Positive** — `startswith` filter now requires `/` separator to avoid partial matches (e.g., `/intune` is not a prefix of `/intune-for-education`)
+
+</Accordion>
+
+---
+
+## Earlier Versions
+
+<Accordion title="v0.7.0-alpha - v0.1.0-alpha">
+
+For complete history of alpha versions (v0.7.0-alpha through v0.1.0-alpha), including:
+
+- Free model indicators and priority sorting
+- Dynamic model suggestions
+- Multi-provider support (Ollama, OpenRouter, OpenCode)
+- Language filtering
+- Native Markdown support
+- SSE progress streaming
+- Phase banners and enriched events
+- Multi-model selectors
+- Cascade discovery (sitemap → nav → recursive crawl)
+- Playwright scraping
+- LLM cleanup with chunking
+- Job cancellation
+- robots.txt support
+- Cloudflare Tunnel exposure
+
+See the full [CHANGELOG.md](https://github.com/plater7/docrawl/blob/main/CHANGELOG.md) in the repository.
+
+</Accordion>
+
+---
+
+## AI-Assisted Development
+
+<Note>
+  This project uses AI-assisted development with human review.
+
+  **Bots**: OpenCode 🤖 (model: glm-5-free) + Claude Code 🤖
+
+  _Co-authored-by: OpenCode 🤖 (opencode@anomaly.la)_
+</Note>
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Contributing" icon="code-pull-request" href="/advanced/contributing">
+    Learn how to contribute to Docrawl
+  </Card>
+  <Card title="Testing Guide" icon="flask-vial" href="/advanced/testing">
+    Run and write tests for the project
+  </Card>
+</CardGroup>

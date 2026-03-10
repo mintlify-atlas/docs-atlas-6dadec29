@@ -1,0 +1,264 @@
+---
+title: System Architecture
+description: High-level overview of Docrawl's architecture, module organization, and key design decisions
+---
+
+## Overview
+
+Docrawl is a FastAPI service that crawls documentation websites and produces clean Markdown or structured JSON output. The system combines:
+
+- **Multi-strategy URL discovery** (sitemap, nav parsing, recursive crawl)
+- **5-level scraping fallback chain** (cache → native MD → proxy MD → HTTP → Playwright)
+- **LLM-based content cleanup** (3-tier classification)
+- **Checkpoint-based pause/resume** for long-running jobs
+
+The architecture runs as a Docker container exposing a REST API with Server-Sent Events (SSE) for real-time progress updates, plus a synthwave-themed web UI for interactive use.
+
+## Module Organization
+
+The source code is organized into specialized modules under `src/`:
+
+### API Layer (`src/api/`)
+
+| Module | Responsibility |
+|--------|---------------|
+| `models.py` | Pydantic request/response models including `JobRequest` (20+ fields), input validation with path traversal prevention and SSRF checks |
+| `routes.py` | FastAPI router with CRUD operations for jobs, SSE event stream, model/provider listing, converter listing, health checks, pause/resume endpoints |
+
+**Security features**: Rate limiting via slowapi (10 jobs/min), optional API key authentication via `X-Api-Key` header
+
+### Crawler (`src/crawler/`)
+
+| Module | Responsibility |
+|--------|---------------|
+| `discovery.py` | 3-strategy URL discovery: sitemap parsing (XML/gzip/nested), Playwright-based nav extraction, parallel BFS recursive crawl |
+| `filter.py` | Deterministic filtering: extension/pattern blocklists, language filtering (9 languages), same-domain enforcement |
+| `robots.py` | Simple robots.txt parser with Disallow rules and crawl-delay support |
+
+**Discovery strategies** run in parallel with automatic fallback. All strategies include URL normalization, same-domain filtering, deduplication, and SSRF validation.
+
+### Job Management (`src/jobs/`)
+
+| Module | Responsibility |
+|--------|---------------|
+| `manager.py` | `JobManager` creates, tracks, and cancels jobs. Manages PagePool lifecycle and background cleanup loop for expired jobs |
+| `runner.py` | 1100+ line pipeline orchestrator that runs all 6 phases sequentially, manages concurrent processing, emits SSE events, handles pause/resume |
+| `state.py` | Checkpoint persistence with atomic writes (`.tmp` → `os.replace()`) enabling pause/resume across restarts |
+
+### LLM Integration (`src/llm/`)
+
+| Module | Responsibility |
+|--------|---------------|
+| `client.py` | Multi-provider LLM client supporting Ollama (local), OpenRouter (cloud), OpenCode (cloud), LM Studio (local). Model caching with 60s TTL |
+| `cleanup.py` | 3-tier markdown cleanup (skip/cleanup/heavy) with smart heuristics, dynamic timeouts, and adaptive context windows |
+| `filter.py` | LLM-based URL classification for filtering non-documentation URLs missed by heuristics |
+
+### Content Extraction (`src/scraper/`)
+
+| Module | Responsibility |
+|--------|---------------|
+| `page.py` | 5-level fallback chain implementation, `PagePool` (reusable page pool), `PageScraper` (Playwright with DOM noise removal) |
+| `cache.py` | Disk-based HTML cache with 24h TTL, opt-in via `use_cache=true` |
+| `detection.py` | Bot-check/captcha detection (`is_blocked_response`) and SHA-256 content deduplication |
+| `markdown.py` | `chunk_markdown()` splits large markdown respecting heading boundaries for LLM processing |
+| `structured.py` | `StructuredPage` / `ContentBlock` models for JSON output format preserving document hierarchy |
+| `converters/` | Plugin system with `MarkdownConverter` Protocol. Default: `MarkdownifyConverter`. Extensible via `register_converter()` |
+
+### Security (`src/utils/`)
+
+| Module | Responsibility |
+|--------|---------------|
+| `security.py` | `validate_url_not_ssrf()` blocks URLs resolving to private/reserved networks (127.0.0.0/8, 10.0.0.0/8, 169.254.0.0/16, etc.) |
+
+## Application Entry Point
+
+`src/main.py` initializes the FastAPI application with:
+
+- **Lifespan management**: PagePool initialization, background cleanup task, graceful shutdown
+- **Middleware stack**: CORS (env-configured), security headers (CSP, X-Frame-Options), API key auth
+- **Structured logging**: JSON formatter for all log output
+- **Global error handler**: Sanitized 500 responses (never leaks internals)
+
+## Key Design Decisions
+
+### 5-Level Scraping Fallback Chain
+
+**Rationale**: Documentation sites range from static HTML (where httpx suffices) to heavy JavaScript SPAs (requiring full Playwright). Each level is cheaper and faster than the next. The chain tries the lightest approach first and escalates only on failure, optimizing for the common case while handling edge cases.
+
+This design reduces average scraping time by ~40% compared to always using Playwright.
+
+### PagePool with asyncio.Queue
+
+**Rationale**: Creating/closing a Playwright page per URL adds ~200ms overhead. The pool pre-warms N pages and reuses them via `asyncio.Queue`, with automatic replacement of broken pages. This optimization cut scraping time by ~40% in benchmarks.
+
+**Configuration**: `PAGE_POOL_SIZE` environment variable (default: 5, 0 = disabled)
+
+### 3-Tier LLM Cleanup Classification
+
+**Rationale**: Code-heavy chunks and short clean text don't benefit from LLM cleanup—they're already clean. The 3-tier classifier (skip/cleanup/heavy) avoids wasting LLM tokens on content that doesn't need it.
+
+**Impact**: Reduces costs and latency by ~30% while maintaining output quality.
+
+**Classification logic**:
+- **skip**: Code density &gt;60% or short text &lt;2000 chars without noise
+- **cleanup**: Standard cleanup for nav residue, footers, broken formatting
+- **heavy**: Cleanup + table repair + LaTeX expression fixing
+
+### Multi-Provider LLM Support
+
+**Rationale**: Flexibility for different use cases. Local models (Ollama, LM Studio) for development/privacy, cloud models (OpenRouter, OpenCode) for production quality.
+
+**Provider routing**: Auto-detected from model name prefix (e.g., `opencode/claude-sonnet-4-5` routes to OpenCode)
+
+### Checkpoint-Based Pause/Resume
+
+**Rationale**: A crawl job can process hundreds of URLs over minutes or hours. Crashes shouldn't lose progress. The state file uses atomic writes (`.tmp` → `os.replace()`) for crash safety.
+
+**Features**:
+- Saves completed URLs, failed URLs, and pending URLs
+- Resume creates a new job with only pending URLs
+- Atomic writes ensure consistency even during crashes
+
+### Converter Plugin System
+
+**Rationale**: Different documentation sites may benefit from specialized HTML-to-Markdown conversion logic.
+
+**Design**: Uses `@runtime_checkable` Protocol instead of ABC for structural subtyping. Any class with `convert()`, `supports_tables()`, and `supports_code_blocks()` methods works—no inheritance required. This simplifies third-party converter integration.
+
+## Infrastructure
+
+### Docker Deployment
+
+- Multi-stage build: Python dependencies + Playwright browser installation
+- `PAGE_POOL_SIZE` environment variable controls browser page pool (default: 5, 0 = disabled)
+- `/data` volume for output files and cache
+- Chromium browser runs in headless mode
+
+### CI/CD (13 GitHub Actions Workflows)
+
+**Quality**:
+- Linting with ruff
+- Testing with pytest + coverage
+- Security scanning with pip-audit + Snyk
+- CodeQL analysis
+
+**Build**:
+- Docker build + publish to GitHub Container Registry (GHCR)
+
+**Release**:
+- Auto-tag on version bump
+- Changelog generation
+- SNAPSHOT regeneration
+
+**Maintenance**:
+- Stale issue cleanup
+- Docs update on merge
+
+## Security Layers
+
+Docrawl implements defense-in-depth security:
+
+<Accordion title="SSRF Protection">
+  `validate_url_not_ssrf()` validates all URLs before httpx and Playwright navigation, blocking access to:
+  - 127.0.0.0/8 (localhost)
+  - 10.0.0.0/8 (private)
+  - 172.16.0.0/12 (private)
+  - 192.168.0.0/16 (private)
+  - 169.254.0.0/16 (link-local)
+  - Other reserved ranges
+</Accordion>
+
+<Accordion title="Input Validation">
+  Pydantic models enforce:
+  - Path traversal prevention (all paths must be under `/data`)
+  - URL scheme enforcement (HTTPS for proxies)
+  - Model name pattern validation
+  - Numeric range constraints
+</Accordion>
+
+<Accordion title="Rate Limiting & Authentication">
+  - slowapi enforces 10 jobs/min per client
+  - Optional API key authentication via `X-Api-Key` header
+  - Configurable via environment variables
+</Accordion>
+
+<Accordion title="Secure Headers">
+  Middleware sets security headers:
+  - Content-Security-Policy
+  - X-Frame-Options: DENY
+  - Referrer-Policy: strict-origin-when-cross-origin
+  - X-Content-Type-Options: nosniff
+</Accordion>
+
+<Accordion title="LLM Security">
+  - XML input wrapping for prompts (prompt injection mitigation)
+  - Exponential backoff retry (prevents resource exhaustion)
+  - Dynamic timeouts prevent hanging
+</Accordion>
+
+<Accordion title="XML Parsing">
+  - defusedxml for sitemap parsing (XXE prevention)
+</Accordion>
+
+<Accordion title="Error Handling">
+  - Sanitized error responses (never expose stack traces)
+  - Structured JSON logging
+</Accordion>
+
+## Concurrency Model
+
+Docrawl uses asyncio throughout for efficient I/O-bound operations:
+
+- **Job orchestration**: Single-threaded asyncio event loop
+- **Concurrent scraping**: `asyncio.Semaphore` limits parallel page fetches (configurable via `max_concurrent`)
+- **PagePool**: `asyncio.Queue` for page reuse without locking overhead
+- **Producer/Consumer mode**: Optional pipeline with `asyncio.Queue(maxsize=20)` for natural backpressure
+
+<Note>
+  The `max_concurrent` parameter controls how many pages are scraped simultaneously. Default is 3, maximum is 10. Higher values increase speed but consume more resources.
+</Note>
+
+## Output Formats
+
+### Markdown (default)
+
+Chunked `.md` files preserving URL structure:
+
+```
+output/
+├── index.md
+├── getting-started.md
+├── api/
+│   ├── authentication.md
+│   └── endpoints.md
+└── _index.md  # Auto-generated table of contents
+```
+
+### JSON (structured)
+
+Structured JSON with 7-block format (`output_format=json`):
+
+| Block | Content |
+|-------|--------|
+| `metadata` | URL, title, crawl timestamp, model used |
+| `navigation` | Extracted nav structure (TOC) |
+| `content` | Main body as clean markdown |
+| `code_blocks` | All code snippets with language tags |
+| `tables` | Extracted tables as structured data |
+| `links` | Internal/external link inventory |
+| `media` | Images/videos with alt text and URLs |
+
+<Note>
+  JSON output skips LLM cleanup entirely, preserving the raw structure. This is ideal for programmatic processing or re-indexing.
+</Note>
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Pipeline Phases" icon="diagram-project" href="/advanced/pipeline-phases">
+    Deep dive into the 6-phase job execution pipeline
+  </Card>
+  <Card title="Scraping Fallbacks" icon="layer-group" href="/advanced/scraping-fallbacks">
+    Understanding the 5-level scraping fallback chain
+  </Card>
+</CardGroup>

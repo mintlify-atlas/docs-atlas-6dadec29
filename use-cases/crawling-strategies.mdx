@@ -1,0 +1,280 @@
+---
+title: "Crawling Strategies"
+description: "Understand the three URL discovery strategies and how Docrawl adapts to different documentation sites"
+---
+
+Docrawl uses a cascading URL discovery system that automatically selects the best strategy for your documentation site. It tries three approaches in order, stopping at the first success.
+
+## Discovery Cascade
+
+The crawler follows a smart cascade that prioritizes speed and reliability:
+
+<Steps>
+  <Step title="Sitemap Parsing">
+    Attempts to fetch and parse `sitemap.xml` for fast, authoritative URL discovery
+  </Step>
+  <Step title="Navigation Parsing">
+    Uses Playwright to extract links from navigation elements (only if sitemap fails)
+  </Step>
+  <Step title="Recursive BFS Crawl">
+    Falls back to comprehensive breadth-first crawling (only if both above fail)
+  </Step>
+</Steps>
+
+<Note>
+  The cascade stops at the first successful strategy. If sitemap parsing finds URLs, the other strategies are skipped entirely.
+</Note>
+
+## Strategy 1: Sitemap Parsing
+
+The fastest and most authoritative method. Docrawl checks multiple locations:
+
+- `/sitemap.xml`
+- `/sitemap_index.xml`
+- Sitemap URLs from `/robots.txt`
+
+### Features
+
+- **Gzip support**: Automatically decompresses `.xml.gz` files
+- **Nested sitemaps**: Recursively parses sitemap index files
+- **Multiple sources**: Combines URLs from all discovered sitemaps
+- **HTTP caching**: Caches sitemap responses to avoid redundant requests on repeat crawls
+
+### Configuration
+
+```json API Request
+{
+  "url": "https://docs.example.com/v2/guides",
+  "filter_by_path": true
+}
+```
+
+<Tip>
+  Set `filter_by_path: true` to only include URLs under the base path. For example, if your base URL is `https://docs.example.com/v2/guides`, only URLs starting with `/v2/guides` will be included.
+</Tip>
+
+### Example Response
+
+```json
+{
+  "strategy_used": "sitemap",
+  "urls_discovered": 127,
+  "sources": [
+    "https://docs.example.com/sitemap.xml",
+    "https://docs.example.com/sitemap-guides.xml.gz"
+  ]
+}
+```
+
+### Implementation Details
+
+From `src/crawler/discovery.py:343-513`:
+
+- Parses XML using defusedxml (XXE-safe)
+- Filters URLs by domain and optional base path
+- Handles 404s and network errors gracefully
+- Skips gzipped sitemaps for caching (binary data can't round-trip through string cache)
+
+## Strategy 2: Navigation Parsing
+
+When sitemap parsing fails, Docrawl uses Playwright to render the page and extract links from navigation elements.
+
+### Target Selectors
+
+The crawler checks these CSS selectors in order:
+
+```css
+nav a
+aside a
+.sidebar a
+.navigation a
+[role="navigation"] a
+.toc a
+.menu a
+```
+
+### Features
+
+- **JavaScript support**: Handles JS-rendered navigation that httpx can't see
+- **Multiple selectors**: Tries common navigation patterns
+- **Same-domain filtering**: Only extracts internal links
+- **URL cap**: Limits to 100 URLs to prevent over-collection
+
+### Configuration
+
+No special configuration needed. Navigation parsing is automatic if sitemap fails.
+
+### Timeout
+
+- Page load: 10 seconds
+- If the page doesn't load within 10s, the strategy fails and moves to recursive crawl
+
+### Example Log Output
+
+```
+INFO: Strategy 1/3: Trying sitemap discovery...
+INFO: ✗ Sitemap: No URLs found
+INFO: Strategy 2/3: Trying nav parsing...
+INFO: Trying nav parsing on https://docs.example.com
+DEBUG: Selector 'nav a' found 45 links
+DEBUG: Selector 'aside a' found 12 links
+INFO: Nav parsing found 57 URLs
+INFO: ✓ Nav parsing success: 57 URLs found
+INFO: Strategy 3/3: Skipping recursive crawl (nav parsing found 57 URLs)
+```
+
+### Implementation Details
+
+From `src/crawler/discovery.py:233-340`:
+
+- SSRF validation before network activity
+- Chromium headless browser
+- Fragment and anchor filtering
+- URL normalization (lowercase domain, trailing slash removal)
+
+## Strategy 3: Recursive BFS Crawl
+
+The most comprehensive but slowest method. Used only when both sitemap and navigation parsing fail.
+
+### How It Works
+
+1. **Start**: Begin at the base URL
+2. **Extract**: Fetch the page and extract all same-domain links
+3. **Queue**: Add new URLs to the next depth level
+4. **Repeat**: Process all URLs at the current depth before moving to the next
+
+### Configuration
+
+```json API Request
+{
+  "url": "https://docs.example.com",
+  "max_depth": 5,
+  "max_concurrent": 10
+}
+```
+
+<CodeGroup>
+
+```json Default Configuration
+{
+  "max_depth": 5,
+  "max_concurrent": 10
+}
+```
+
+```json Sequential Crawl
+{
+  "max_depth": 3,
+  "max_concurrent": 1
+}
+```
+
+```json Aggressive Crawl
+{
+  "max_depth": 10,
+  "max_concurrent": 20
+}
+```
+
+</CodeGroup>
+
+### Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `max_depth` | 5 | Maximum link depth to follow (1 = only direct links) |
+| `max_concurrent` | 10 | Concurrent requests per depth level (set to 1 for sequential) |
+
+<Note>
+  The `max_concurrent` setting defaults to the `DISCOVERY_CONCURRENCY` environment variable if not specified.
+</Note>
+
+### Safety Features
+
+- **URL cap**: Maximum 1000 URLs to prevent explosion
+- **Jitter**: 0.1-0.3s delay between requests (rate limiting mitigation)
+- **Timeouts**: 10s per request
+- **Per-URL error handling**: Failures don't stop the entire crawl
+- **Heartbeat logging**: Progress logged every 10 URLs
+
+### Example Log Output
+
+```
+INFO: Strategy 3/3: Falling back to recursive crawl (comprehensive)
+DEBUG: Crawling depth 0/5: 1 URLs in parallel
+DEBUG: Crawling depth 1/5: 23 URLs in parallel
+INFO: Crawl progress: 10 URLs discovered
+INFO: Crawl progress: 20 URLs discovered
+DEBUG: Crawling depth 2/5: 87 URLs in parallel
+INFO: Crawl progress: 30 URLs discovered
+...
+INFO: Recursive crawl complete: 342 URLs found
+INFO: ✓ Recursive crawl success: 342 URLs found
+```
+
+### Performance Characteristics
+
+| Depth | Concurrency | Typical Time | URLs Found |
+|-------|-------------|--------------|------------|
+| 3     | 10          | 30-60s       | 50-200     |
+| 5     | 10          | 60-120s      | 200-500    |
+| 10    | 20          | 120-300s     | 500-1000   |
+
+### Implementation Details
+
+From `src/crawler/discovery.py:131-230`:
+
+- Parallel BFS per depth level using `asyncio.gather`
+- URL normalization and deduplication
+- Same-domain filtering
+- BeautifulSoup HTML parsing
+- Fragment removal (`#section`)
+- Trailing slash normalization
+
+## Fallback Guarantee
+
+<Note>
+  Docrawl **never** returns an empty URL list. If all strategies fail, it returns the base URL as a minimum fallback.
+</Note>
+
+```python
+if not final_urls:
+    logger.warning("⚠ All strategies failed! Returning base URL as minimum fallback")
+    final_urls = [normalize_url(base_url)]
+```
+
+## Monitoring Discovery
+
+You can monitor the discovery process in real-time using the SSE event stream:
+
+```bash
+curl -N http://localhost:8000/api/jobs/{job_id}/events
+```
+
+Example events:
+
+```json
+{"event": "log", "data": "Strategy 1/3: Trying sitemap discovery..."}
+{"event": "log", "data": "✓ Sitemap success: 127 URLs found"}
+{"event": "discovery_complete", "data": {"total_urls": 127, "strategy": "sitemap"}}
+```
+
+## Best Practices
+
+<Tip>
+  **For versioned docs**: Use `filter_by_path: true` to avoid crawling other versions. If your docs are at `/v2/`, only URLs under `/v2/` will be included.
+</Tip>
+
+<Tip>
+  **For slow sites**: Set `max_concurrent: 5` or lower to avoid overwhelming the server.
+</Tip>
+
+<Tip>
+  **For dynamic sites**: If your navigation is JavaScript-rendered and sitemap is unavailable, strategy 2 (navigation parsing) will automatically handle it.
+</Tip>
+
+## Related
+
+- [Filtering URLs](/use-cases/filtering-urls) - Learn how to filter discovered URLs
+- [Configuration Guide](/guides/configuration) - Advanced crawler settings
+- [Performance Tuning](/advanced/performance) - Optimize discovery speed

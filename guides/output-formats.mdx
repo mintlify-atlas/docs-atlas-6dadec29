@@ -1,0 +1,439 @@
+---
+title: 'Output Formats'
+description: 'Understand markdown and JSON output formats'
+---
+
+Docrawl supports two output formats: **Markdown** (default) and **JSON** (structured). Choose based on your use case.
+
+## Format Comparison
+
+<CardGroup cols={2}>
+  <Card title="Markdown" icon="markdown">
+    - Human-readable text files
+    - Direct use in documentation sites
+    - LLM cleanup applied
+    - Default format
+  </Card>
+  <Card title="JSON" icon="brackets-curly">
+    - Structured typed blocks
+    - Machine-readable format
+    - No LLM cleanup (preserves raw content)
+    - Added in PR 3.2
+  </Card>
+</CardGroup>
+
+## Markdown Output
+
+### Overview
+
+Markdown is the default output format, optimized for documentation sites and human readability.
+
+### Configuration
+
+```json
+{
+  "output_format": "markdown"
+}
+```
+
+### Output Structure
+
+```
+./data/
+└── docs.example.com/
+    ├── introduction.md
+    ├── getting-started.md
+    ├── api/
+    │   ├── endpoints.md
+    │   ├── authentication.md
+    │   └── rate-limits.md
+    ├── guides/
+    │   ├── installation.md
+    │   └── configuration.md
+    └── _index.md
+```
+
+### File Naming
+
+- URL paths map to file paths
+- `/docs/api/endpoints` → `api/endpoints.md`
+- Root URL → `_index.md`
+- Special characters are sanitized
+
+### Example Output
+
+```markdown introduction.md
+# Introduction
+
+Welcome to our documentation. This guide will help you get started.
+
+## Quick Start
+
+Follow these steps:
+
+1. Install the package
+2. Configure your environment
+3. Run your first command
+
+## Features
+
+- Fast performance
+- Easy to use
+- Well documented
+
+```bash
+npm install example-package
+```
+```
+
+### Processing Pipeline
+
+1. **HTML Extraction**: Playwright renders the page
+2. **DOM Cleaning**: Remove navigation, footer, sidebar elements
+3. **Markdown Conversion**: Convert HTML to markdown
+4. **LLM Cleanup**: AI removes remaining noise and formats content
+5. **File Write**: Atomic write to disk
+
+<Note>
+LLM cleanup runs per-page and intelligently skips clean chunks to save tokens and time.
+</Note>
+
+## JSON Output
+
+### Overview
+
+JSON output provides structured, typed content blocks for programmatic processing.
+
+### Configuration
+
+```json
+{
+  "output_format": "json"
+}
+```
+
+### Output Structure
+
+```
+./data/
+└── docs.example.com/
+    ├── introduction.json
+    ├── getting-started.json
+    ├── api/
+    │   ├── endpoints.json
+    │   └── authentication.json
+    └── _index.json
+```
+
+### Example Output
+
+```json introduction.json
+{
+  "url": "https://docs.example.com/introduction",
+  "title": "Introduction - Example Docs",
+  "blocks": [
+    {
+      "type": "heading",
+      "content": "Introduction",
+      "level": 1
+    },
+    {
+      "type": "paragraph",
+      "content": "Welcome to our documentation. This guide will help you get started."
+    },
+    {
+      "type": "heading",
+      "content": "Quick Start",
+      "level": 2
+    },
+    {
+      "type": "list",
+      "content": "Install the package\nConfigure your environment\nRun your first command"
+    },
+    {
+      "type": "code",
+      "content": "npm install example-package",
+      "language": "bash"
+    },
+    {
+      "type": "image",
+      "content": "https://docs.example.com/screenshot.png",
+      "alt": "Dashboard screenshot"
+    }
+  ]
+}
+```
+
+### Block Types
+
+Defined in `src/scraper/structured.py:25`:
+
+```python
+BlockType = Literal[
+    "heading",      # H1-H6 headings
+    "paragraph",    # Regular text
+    "code",         # Code blocks or inline code
+    "table",        # HTML tables
+    "list",         # Ordered/unordered lists
+    "image",        # Images
+    "blockquote"    # Quoted content
+]
+```
+
+### Block Schema
+
+<Tabs>
+  <Tab title="Heading">
+    ```typescript
+    {
+      type: "heading",
+      content: string,        // Text content
+      level: 1 | 2 | 3 | 4 | 5 | 6  // H1-H6
+    }
+    ```
+  </Tab>
+  <Tab title="Paragraph">
+    ```typescript
+    {
+      type: "paragraph",
+      content: string         // Text content
+    }
+    ```
+  </Tab>
+  <Tab title="Code">
+    ```typescript
+    {
+      type: "code",
+      content: string,        // Code content
+      language: string | null // Detected language (e.g., "python")
+    }
+    ```
+  </Tab>
+  <Tab title="Table">
+    ```typescript
+    {
+      type: "table",
+      content: string         // JSON array of rows: [["cell1", "cell2"], ...]
+    }
+    ```
+  </Tab>
+  <Tab title="List">
+    ```typescript
+    {
+      type: "list",
+      content: string         // Newline-separated items
+    }
+    ```
+  </Tab>
+  <Tab title="Image">
+    ```typescript
+    {
+      type: "image",
+      content: string,        // Image URL
+      alt: string | null      // Alt text
+    }
+    ```
+  </Tab>
+  <Tab title="Blockquote">
+    ```typescript
+    {
+      type: "blockquote",
+      content: string         // Quoted text
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Processing Pipeline
+
+1. **HTML Extraction**: Playwright renders the page
+2. **DOM Parsing**: BeautifulSoup parses HTML structure
+3. **Block Extraction**: Recursive element parsing into typed blocks
+4. **JSON Serialization**: Convert to JSON format
+5. **Atomic Write**: Write `.tmp` file then rename
+
+<Warning>
+JSON output **does not** apply LLM cleanup. Content is extracted as-is from HTML.
+</Warning>
+
+## When to Use Each Format
+
+### Use Markdown When:
+
+- ✅ Publishing to documentation sites (Mintlify, Docusaurus, GitBook)
+- ✅ Need human-readable files
+- ✅ Want AI-cleaned content
+- ✅ Converting docs for LLM training data
+- ✅ Creating searchable documentation archives
+
+### Use JSON When:
+
+- ✅ Building content indexes or search engines
+- ✅ Need structured data for processing
+- ✅ Preserving exact HTML structure
+- ✅ Feeding into data pipelines
+- ✅ Need typed content blocks for rendering
+- ✅ Building custom documentation tooling
+
+## Converter Plugins
+
+HTML to Markdown conversion uses pluggable converters (PR 3.4).
+
+### Available Converters
+
+Check available converters:
+
+```bash
+curl http://localhost:8002/api/converters
+```
+
+Response:
+```json
+{
+  "converters": ["markdownify"]
+}
+```
+
+### Default Converter
+
+The default `markdownify` converter is defined in `src/scraper/converters/markdownify_converter.py`.
+
+### Selecting a Converter
+
+```json
+{
+  "converter": "markdownify",
+  "output_format": "markdown"
+}
+```
+
+<Note>
+Converter selection only applies to markdown output. JSON output uses its own parser.
+</Note>
+
+### Custom Converters
+
+To register a custom converter:
+
+```python
+from src.scraper.converters import register_converter
+from src.scraper.converters.base import MarkdownConverter
+
+class MyConverter(MarkdownConverter):
+    def convert(self, html: str) -> str:
+        # Your conversion logic
+        return markdown
+
+register_converter("my_converter", MyConverter())
+```
+
+## File Handling
+
+### Atomic Writes
+
+Both formats use atomic writes to prevent corruption:
+
+1. Write to `.tmp` file
+2. Rename to final path
+3. OS ensures atomicity
+
+This prevents partial files if the process is interrupted.
+
+### Directory Structure
+
+Output directories mirror the crawled site structure:
+
+```
+URL: https://docs.example.com/api/endpoints
+Path: ./data/docs.example.com/api/endpoints.md
+```
+
+Parent directories are created automatically.
+
+### Special Files
+
+- `_index.md` / `_index.json` - Root page of the site
+- `.job_state.json` - Job checkpoint for pause/resume
+
+## Output Examples
+
+### Markdown Example: API Docs
+
+```markdown endpoints.md
+# API Endpoints
+
+Our API provides the following endpoints.
+
+## Authentication
+
+All requests require an API key:
+
+```bash
+curl -H "Authorization: Bearer YOUR_API_KEY" \
+  https://api.example.com/v1/users
+```
+
+## Users
+
+### GET /users
+
+Retrieve all users.
+
+**Response:**
+
+```json
+{
+  "users": [
+    {"id": 1, "name": "Alice"},
+    {"id": 2, "name": "Bob"}
+  ]
+}
+```
+```
+
+### JSON Example: API Docs
+
+```json endpoints.json
+{
+  "url": "https://docs.example.com/api/endpoints",
+  "title": "API Endpoints",
+  "blocks": [
+    {"type": "heading", "content": "API Endpoints", "level": 1},
+    {"type": "paragraph", "content": "Our API provides the following endpoints."},
+    {"type": "heading", "content": "Authentication", "level": 2},
+    {"type": "paragraph", "content": "All requests require an API key:"},
+    {
+      "type": "code",
+      "content": "curl -H \"Authorization: Bearer YOUR_API_KEY\" https://api.example.com/v1/users",
+      "language": "bash"
+    },
+    {"type": "heading", "content": "Users", "level": 2},
+    {"type": "heading", "content": "GET /users", "level": 3},
+    {"type": "paragraph", "content": "Retrieve all users."},
+    {"type": "paragraph", "content": "Response:"},
+    {
+      "type": "code",
+      "content": "{\n  \"users\": [\n    {\"id\": 1, \"name\": \"Alice\"},\n    {\"id\": 2, \"name\": \"Bob\"}\n  ]\n}",
+      "language": "json"
+    }
+  ]
+}
+```
+
+## Performance Considerations
+
+### Markdown
+- **Slower**: LLM cleanup adds processing time
+- **Token Cost**: Uses LLM tokens per page
+- **Quality**: Higher quality, cleaner output
+
+### JSON
+- **Faster**: No LLM processing
+- **Zero Token Cost**: Pure HTML parsing
+- **Quality**: Preserves raw HTML structure, may include noise
+
+## Related
+
+- [Configuration](/guides/configuration) - Set output_format and converter
+- [LLM Providers](/guides/llm-providers) - Models used for markdown cleanup
+- [Docker Deployment](/guides/docker-deployment) - Volume mounts and output paths

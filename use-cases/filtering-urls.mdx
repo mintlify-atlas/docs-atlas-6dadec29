@@ -1,0 +1,422 @@
+---
+title: "Filtering URLs"
+description: "Configure the three-layer filtering system to control which URLs are crawled and converted"
+---
+
+Docrawl applies a three-layer filtering system to ensure only relevant documentation pages are processed. Filters are applied in order, with each layer removing URLs before the next layer runs.
+
+## Filtering Pipeline
+
+<Steps>
+  <Step title="Deterministic Filtering">
+    Fast rule-based filtering: extension blocklist, pattern blocklist, language filter
+  </Step>
+  <Step title="robots.txt Filtering">
+    Respects site-specific crawl rules and user-agent restrictions
+  </Step>
+  <Step title="LLM Filtering">
+    Intelligent content-based filtering using language models (optional)
+  </Step>
+</Steps>
+
+## Layer 1: Deterministic Filtering
+
+Fast, rule-based filtering applied immediately after URL discovery. Implemented in `src/crawler/filter.py`.
+
+### Extension Blocklist
+
+Blocks URLs ending with these extensions:
+
+```python
+.pdf, .zip, .tar, .gz, .rar
+.png, .jpg, .jpeg, .gif, .svg, .ico, .webp
+.mp4, .mp3, .wav, .avi, .mov
+.doc, .docx, .xls, .xlsx, .ppt, .pptx
+.exe, .dmg, .deb, .rpm
+```
+
+**Example URLs blocked**:
+- ❌ `https://docs.example.com/guide.pdf`
+- ❌ `https://docs.example.com/assets/logo.png`
+- ✅ `https://docs.example.com/guide/installation.html`
+
+### Pattern Blocklist
+
+Blocks URLs containing these path patterns:
+
+```python
+/blog/
+/changelog/
+/api-reference/
+/releases/
+/download/
+/assets/
+```
+
+**Example URLs blocked**:
+- ❌ `https://docs.example.com/blog/new-feature`
+- ❌ `https://docs.example.com/changelog/v2.0`
+- ✅ `https://docs.example.com/guides/authentication`
+
+<Note>
+  The pattern blocklist is case-insensitive. Both `/Blog/` and `/blog/` are blocked.
+</Note>
+
+### Language Filtering
+
+Filters URLs by language prefix. Supports 9 languages:
+
+| Language | Patterns |
+|----------|----------|
+| English  | `/en/`, `/en-us/`, `/en-gb/`, `/en-au/`, `/en-ca/`, `/en-in/`, `/english/` |
+| Spanish  | `/es/`, `/es-es/`, `/es-mx/`, `/es-ar/`, `/es-cl/`, `/es-co/`, `/spanish/` |
+| French   | `/fr/`, `/fr-fr/`, `/fr-ca/`, `/french/` |
+| German   | `/de/`, `/de-de/`, `/de-at/`, `/de-ch/`, `/german/` |
+| Japanese | `/ja/`, `/jp/`, `/japanese/` |
+| Chinese  | `/zh/`, `/zh-cn/`, `/zh-tw/`, `/zh-hk/`, `/chinese/` |
+| Portuguese | `/pt/`, `/pt-br/`, `/pt-pt/`, `/portuguese/` |
+| Russian  | `/ru/`, `/russian/` |
+| Korean   | `/ko/`, `/kr/`, `/korean/` |
+
+### Language Filtering Strategy
+
+1. **If URL contains target language** → Include
+2. **If URL contains OTHER language** → Exclude
+3. **If URL has NO language prefix** → Check base URL to determine fallback
+
+### Configuration
+
+```json API Request
+{
+  "url": "https://docs.example.com",
+  "language": "en"
+}
+```
+
+<CodeGroup>
+
+```json English Only (Default)
+{
+  "language": "en"
+}
+```
+
+```json All Languages
+{
+  "language": "all"
+}
+```
+
+```json Spanish
+{
+  "language": "es"
+}
+```
+
+</CodeGroup>
+
+### Example: Language Filtering
+
+**Base URL**: `https://docs.example.com/en/guides`  
+**Language**: `en`
+
+| URL | Result | Reason |
+|-----|--------|--------|
+| `/en/guides/quickstart` | ✅ Include | Matches target language |
+| `/es/guides/quickstart` | ❌ Exclude | Different language |
+| `/guides/quickstart` | ✅ Include | Base URL has `/en/`, so URLs without prefix are assumed same language |
+| `/fr/guides/quickstart` | ❌ Exclude | Different language |
+
+### Domain and Path Filtering
+
+Always applied regardless of configuration:
+
+- **Same domain only**: `parsed.netloc == base_domain`
+- **Same path prefix**: `path.startswith(base_path)` (if base URL has a path)
+
+**Example**:
+
+**Base URL**: `https://docs.example.com/v2/api`
+
+| URL | Result | Reason |
+|-----|--------|--------|
+| `https://docs.example.com/v2/api/auth` | ✅ Include | Same domain + path prefix |
+| `https://docs.example.com/v1/api/auth` | ❌ Exclude | Different path prefix |
+| `https://blog.example.com/v2/api/auth` | ❌ Exclude | Different domain |
+
+### Implementation Reference
+
+From `src/crawler/filter.py:60-101`:
+
+```python
+def filter_urls(urls: list[str], base_url: str, language: str = "en") -> list[str]:
+    """
+    Apply deterministic filtering to URL list.
+    - Only same domain/subpath
+    - Exclude non-doc extensions
+    - Exclude common non-doc patterns
+    - Filter by language (default: English only)
+    - Deduplicate
+    """
+```
+
+## Layer 2: robots.txt Filtering
+
+Respects standard web crawling etiquette by checking `robots.txt` before making requests.
+
+### What It Checks
+
+- **User-Agent rules**: Respects `User-Agent: DocRawl/1.0` directives
+- **Disallow rules**: Skips paths marked as disallowed
+- **Crawl-delay**: Honors requested delays between requests
+
+### Example robots.txt
+
+```txt
+User-agent: *
+Disallow: /admin/
+Disallow: /api/internal/
+Crawl-delay: 1
+
+User-agent: DocRawl
+Allow: /api/docs/
+Crawl-delay: 0.5
+```
+
+**Result**: Docrawl will:
+- ✅ Crawl `/api/docs/` (explicitly allowed)
+- ❌ Skip `/admin/` and `/api/internal/`
+- ⏱️ Wait 0.5s between requests (crawl-delay for DocRawl user-agent)
+
+<Note>
+  Docrawl identifies itself with `User-Agent: DocRawl/1.0 (Documentation Crawler)` in all requests.
+</Note>
+
+## Layer 3: LLM Filtering (Optional)
+
+Uses language models to intelligently filter URLs based on content relevance. Applied after deterministic filtering.
+
+### How It Works
+
+1. **Input**: List of URLs that passed deterministic filters
+2. **Prompt**: Asks LLM to identify true documentation pages
+3. **Output**: Filtered and ordered list (basics first, advanced later)
+
+### Configuration
+
+```json API Request
+{
+  "url": "https://docs.example.com",
+  "model": "llama3.2:latest",
+  "use_llm_filtering": true
+}
+```
+
+<Tip>
+  LLM filtering is disabled by default. Enable it with `use_llm_filtering: true` when you need intelligent content-based filtering.
+</Tip>
+
+### LLM Prompt
+
+From `src/llm/filter.py:13-25`:
+
+```python
+FILTER_PROMPT_TEMPLATE = """Filter these documentation URLs, keeping only actual documentation pages.
+Remove: blog posts, changelogs, release notes, download pages, asset files.
+Keep: guides, tutorials, concepts, reference docs, getting started.
+
+URLs:
+{urls}
+
+Return a JSON array of filtered URLs, ordered by suggested reading order (basics first, advanced later).
+Only return the JSON array, no other text."""
+```
+
+### Example Filtering
+
+**Input (20 URLs)**:
+```json
+[
+  "https://docs.example.com/guides/quickstart",
+  "https://docs.example.com/blog/announcing-v2",
+  "https://docs.example.com/guides/authentication",
+  "https://docs.example.com/changelog/2024-03-10",
+  "https://docs.example.com/concepts/architecture",
+  "https://docs.example.com/download/cli-tools",
+  ...
+]
+```
+
+**Output (12 URLs, ordered)**:
+```json
+[
+  "https://docs.example.com/guides/quickstart",
+  "https://docs.example.com/guides/authentication",
+  "https://docs.example.com/concepts/architecture",
+  ...
+]
+```
+
+### Performance Characteristics
+
+- **Context window**: Adaptive based on URL list size (4096+ tokens)
+- **Retries**: Up to 3 attempts with exponential backoff (1s, 2s, 4s)
+- **Fallback**: Returns original list if all retries fail
+- **Temperature**: 0.0 for deterministic results
+
+### Adaptive Context Sizing
+
+From `src/llm/filter.py:28-42`:
+
+```python
+def _filter_options(urls: list[str]) -> dict[str, Any]:
+    """Build Ollama options scaled to the actual URL list size.
+    
+    Avoids silent truncation when sites have 100+ URLs.
+    """
+    urls_text = "\n".join(urls)
+    estimated_input_tokens = _estimate_tokens(urls_text) + 300  # + prompt overhead
+    num_ctx = max(4096, estimated_input_tokens + 1024)
+    return {
+        "num_ctx": num_ctx,
+        "num_predict": min(len(urls) * 20 + 256, 4096),
+        "temperature": 0.0,
+    }
+```
+
+<Note>
+  The context window automatically scales to fit your URL list. Sites with 100+ URLs get larger context windows to prevent truncation.
+</Note>
+
+## Complete Filtering Example
+
+### Request
+
+```bash
+curl -X POST http://localhost:8000/api/jobs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://docs.example.com/v2/",
+    "language": "en",
+    "use_llm_filtering": true,
+    "model": "llama3.2:latest"
+  }'
+```
+
+### Filtering Pipeline Results
+
+**1. URL Discovery**
+- Sitemap found: 250 URLs
+
+**2. Layer 1 (Deterministic)**
+- Removed 50 asset files (`.png`, `.pdf`)
+- Removed 20 blog posts (`/blog/`)
+- Removed 30 changelogs (`/changelog/`)
+- Removed 15 Spanish pages (`/es/`)
+- **Remaining**: 135 URLs
+
+**3. Layer 2 (robots.txt)**
+- Removed 5 URLs (disallowed by robots.txt)
+- **Remaining**: 130 URLs
+
+**4. Layer 3 (LLM)**
+- Removed 25 URLs (non-documentation content)
+- Reordered by reading difficulty
+- **Final**: 105 URLs
+
+### Response
+
+```json
+{
+  "id": "job_123",
+  "status": "running",
+  "pages_total": 105,
+  "pages_completed": 0
+}
+```
+
+## Custom Filtering
+
+You can customize the filtering rules by modifying the source code:
+
+### Add Custom Extensions
+
+`src/crawler/filter.py:8-36`
+
+```python
+EXCLUDED_EXTENSIONS = {
+    ".pdf",
+    ".zip",
+    # Add your custom extensions
+    ".xml",
+    ".json",
+}
+```
+
+### Add Custom Patterns
+
+`src/crawler/filter.py:38-45`
+
+```python
+EXCLUDED_PATTERNS = {
+    "/blog/",
+    "/changelog/",
+    # Add your custom patterns
+    "/archive/",
+    "/deprecated/",
+}
+```
+
+### Add Custom Languages
+
+`src/crawler/filter.py:47-57`
+
+```python
+LANGUAGE_PATTERNS = {
+    "en": ["/en/", "/en-us/", "/english/"],
+    # Add your custom language
+    "it": ["/it/", "/italian/"],
+}
+```
+
+## Monitoring Filters
+
+Filter statistics are logged for every job:
+
+```
+INFO: Filtered 250 URLs down to 135 (language: en)
+INFO: robots.txt: 5 URLs disallowed
+INFO: LLM filtered 135 URLs to 105
+```
+
+You can monitor in real-time via SSE:
+
+```bash
+curl -N http://localhost:8000/api/jobs/{job_id}/events
+```
+
+```json
+{"event": "log", "data": "Filtered 250 URLs down to 135 (language: en)"}
+{"event": "log", "data": "LLM filtered 135 URLs to 105"}
+{"event": "filtering_complete", "data": {"final_count": 105}}
+```
+
+## Best Practices
+
+<Tip>
+  **Start without LLM filtering**: The deterministic filters catch 90% of noise. Enable LLM filtering only if you need content-based intelligence.
+</Tip>
+
+<Tip>
+  **Use language filters for multilingual sites**: If your docs have multiple language versions, set `language: "en"` to avoid duplicate content.
+</Tip>
+
+<Tip>
+  **Respect robots.txt**: Docrawl automatically respects robots.txt. If you're being blocked, check the site's crawl rules.
+</Tip>
+
+## Related
+
+- [Crawling Strategies](/use-cases/crawling-strategies) - Learn how URLs are discovered
+- [Configuration Guide](/guides/configuration) - Advanced filtering settings
+- [LLM Providers](/guides/llm-providers) - Configure models for LLM filtering

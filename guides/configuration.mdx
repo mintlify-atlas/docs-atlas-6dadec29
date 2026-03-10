@@ -1,0 +1,366 @@
+---
+title: 'Job Configuration'
+description: 'Complete reference for crawl job parameters and settings'
+---
+
+Docrawl jobs are highly configurable through the `JobRequest` model. This guide covers all available options and their defaults.
+
+## Core Settings
+
+### URL and Models
+
+<ParamField path="url" type="HttpUrl" required>
+  The documentation site to crawl. Must be a valid HTTP or HTTPS URL.
+  
+  ```json
+  "url": "https://docs.example.com"
+  ```
+</ParamField>
+
+<ParamField path="crawl_model" type="string" required>
+  Model for discovery and URL filtering. Fast, lightweight model recommended.
+  
+  ```json
+  "crawl_model": "mistral:7b"
+  ```
+  
+  Pattern: `^[\w./:@-]{1,100}$`
+</ParamField>
+
+<ParamField path="pipeline_model" type="string" required>
+  Model for markdown cleanup and processing. Balanced quality/speed recommended.
+  
+  ```json
+  "pipeline_model": "qwen2.5:14b"
+  ```
+</ParamField>
+
+<ParamField path="reasoning_model" type="string" required>
+  Model for complex analysis (future use). Can match pipeline_model.
+  
+  ```json
+  "reasoning_model": "qwen2.5:14b"
+  ```
+</ParamField>
+
+## Discovery Settings
+
+<ParamField path="max_depth" type="integer" default={5}>
+  Maximum crawl depth from the starting URL.
+  
+  - Min: `1`
+  - Max: `20`
+  - Default: `5`
+  
+  ```json
+  "max_depth": 5
+  ```
+</ParamField>
+
+<ParamField path="respect_robots_txt" type="boolean" default={true}>
+  Whether to respect robots.txt rules.
+  
+  ```json
+  "respect_robots_txt": true
+  ```
+  
+  <Warning>
+  Disabling this may violate site policies and result in IP blocks.
+  </Warning>
+</ParamField>
+
+<ParamField path="filter_sitemap_by_path" type="boolean" default={true}>
+  Filter sitemap URLs to only include those under the base path.
+  
+  Added in PR 1.3. Prevents crawling unrelated sections when starting from a subpath.
+  
+  ```json
+  "filter_sitemap_by_path": true
+  ```
+</ParamField>
+
+## Filtering Settings
+
+<ParamField path="language" type="string" default="en">
+  Language filter for URLs. Filters based on path segments like `/en/`, `/es/`.
+  
+  - Use `"all"` to disable language filtering
+  - Max length: 10 characters
+  
+  ```json
+  "language": "en"
+  ```
+  
+  Examples:
+  - `"en"` → Only crawl `/en/` paths
+  - `"es"` → Only crawl `/es/` paths
+  - `"all"` → Crawl all languages
+</ParamField>
+
+## Scraping Settings
+
+<ParamField path="delay_ms" type="integer" default={500}>
+  Delay between requests in milliseconds.
+  
+  - Min: `100`
+  - Max: `60000` (1 minute)
+  - Default: `500`
+  
+  ```json
+  "delay_ms": 500
+  ```
+  
+  Increase this if you encounter rate limiting.
+</ParamField>
+
+<ParamField path="max_concurrent" type="integer" default={3}>
+  Maximum concurrent page requests.
+  
+  - Min: `1`
+  - Max: `10`
+  - Default: `3`
+  
+  ```json
+  "max_concurrent": 3
+  ```
+  
+  <Note>
+  Higher values increase speed but may trigger rate limits or overload the target site.
+  </Note>
+</ParamField>
+
+<ParamField path="use_native_markdown" type="boolean" default={true}>
+  Attempt to fetch markdown directly using `Accept: text/markdown` header.
+  
+  Many modern documentation sites (Mintlify, GitBook) support native markdown responses.
+  
+  ```json
+  "use_native_markdown": true
+  ```
+</ParamField>
+
+<ParamField path="use_markdown_proxy" type="boolean" default={false}>
+  Use a markdown proxy service as fallback.
+  
+  ```json
+  "use_markdown_proxy": false
+  ```
+  
+  Requires `markdown_proxy_url` to be set.
+</ParamField>
+
+<ParamField path="markdown_proxy_url" type="string | null" default={null}>
+  HTTPS URL of markdown conversion proxy.
+  
+  ```json
+  "markdown_proxy_url": "https://proxy.example.com"
+  ```
+  
+  <Warning>
+  Must use HTTPS. HTTP URLs are rejected to prevent SSRF attacks (CONS-019).
+  </Warning>
+</ParamField>
+
+<ParamField path="use_http_fast_path" type="boolean" default={true}>
+  Try plain HTTP requests before launching Playwright.
+  
+  Added in PR 1.3. Significantly faster for static sites.
+  
+  ```json
+  "use_http_fast_path": true
+  ```
+</ParamField>
+
+<ParamField path="use_cache" type="boolean" default={false}>
+  Enable disk cache for scraped pages (24h TTL).
+  
+  Added in PR 2.4. Useful for re-running jobs or testing.
+  
+  ```json
+  "use_cache": false
+  ```
+</ParamField>
+
+## LLM Settings
+
+<ParamField path="converter" type="string | null" default={null}>
+  HTML to Markdown converter plugin name.
+  
+  Added in PR 3.4. Default uses `markdownify`.
+  
+  ```json
+  "converter": "markdownify"
+  ```
+  
+  Available converters: `["markdownify"]`
+  
+  Pattern: `^[\w-]{1,50}$`
+</ParamField>
+
+<ParamField path="use_pipeline_mode" type="boolean" default={false}>
+  Enable async producer/consumer pipeline for parallel processing.
+  
+  Added in PR 3.3. Experimental feature.
+  
+  ```json
+  "use_pipeline_mode": false
+  ```
+</ParamField>
+
+## Output Settings
+
+<ParamField path="output_path" type="string" default="/data/output">
+  Output directory path. Must be under `/data` for security.
+  
+  ```json
+  "output_path": "/data/output"
+  ```
+  
+  Path traversal attempts are blocked (CONS-001).
+</ParamField>
+
+<ParamField path="output_format" type="string" default="markdown">
+  Output format: `markdown` or `json`.
+  
+  Added in PR 3.2.
+  
+  ```json
+  "output_format": "markdown"
+  ```
+  
+  Options:
+  - `"markdown"` - Standard .md files
+  - `"json"` - Structured JSON with typed content blocks
+</ParamField>
+
+## Configuration Categories
+
+### Discovery
+Controls how Docrawl finds pages to crawl:
+- `max_depth` - How deep to crawl from start URL
+- `respect_robots_txt` - Honor robots.txt rules
+- `filter_sitemap_by_path` - Filter sitemap to subpath
+- `language` - Language filter for URLs
+
+### Scraping
+Controls request behavior:
+- `delay_ms` - Rate limiting between requests
+- `max_concurrent` - Parallel request limit
+- `use_http_fast_path` - Try HTTP before Playwright
+- `use_cache` - Enable disk caching
+
+### Markdown Processing
+Controls content extraction:
+- `use_native_markdown` - Request native markdown
+- `use_markdown_proxy` - Use proxy fallback
+- `markdown_proxy_url` - Proxy service URL
+- `converter` - HTML→MD converter plugin
+
+### LLM
+Controls AI model usage:
+- `crawl_model` - Discovery model
+- `pipeline_model` - Processing model
+- `reasoning_model` - Analysis model
+- `use_pipeline_mode` - Async processing
+
+### Output
+Controls result storage:
+- `output_path` - Destination directory
+- `output_format` - File format (md/json)
+
+## Example Configurations
+
+<Tabs>
+  <Tab title="Quick Start">
+    ```json
+    {
+      "url": "https://docs.example.com",
+      "crawl_model": "mistral:7b",
+      "pipeline_model": "qwen2.5:14b",
+      "reasoning_model": "qwen2.5:14b"
+    }
+    ```
+    Uses all defaults. Good for most documentation sites.
+  </Tab>
+  <Tab title="Fast & Aggressive">
+    ```json
+    {
+      "url": "https://docs.example.com",
+      "crawl_model": "mistral:7b",
+      "pipeline_model": "qwen2.5:14b",
+      "reasoning_model": "qwen2.5:14b",
+      "max_concurrent": 8,
+      "delay_ms": 200,
+      "max_depth": 10,
+      "use_http_fast_path": true,
+      "use_cache": true
+    }
+    ```
+    Optimized for speed. Higher concurrency and lower delays.
+  </Tab>
+  <Tab title="Careful & Respectful">
+    ```json
+    {
+      "url": "https://docs.example.com",
+      "crawl_model": "mistral:7b",
+      "pipeline_model": "qwen2.5:14b",
+      "reasoning_model": "qwen2.5:14b",
+      "max_concurrent": 1,
+      "delay_ms": 2000,
+      "max_depth": 3,
+      "respect_robots_txt": true
+    }
+    ```
+    Conservative settings to avoid rate limits.
+  </Tab>
+  <Tab title="JSON Output">
+    ```json
+    {
+      "url": "https://docs.example.com",
+      "crawl_model": "mistral:7b",
+      "pipeline_model": "qwen2.5:14b",
+      "reasoning_model": "qwen2.5:14b",
+      "output_format": "json",
+      "output_path": "/data/structured-output"
+    }
+    ```
+    Structured JSON output with typed content blocks.
+  </Tab>
+</Tabs>
+
+## Validation
+
+All configuration is validated by Pydantic models in `src/api/models.py:12`:
+
+```python
+class JobRequest(BaseModel):
+    url: HttpUrl
+    crawl_model: str = Field(pattern=r"^[\w./:@-]{1,100}$")
+    pipeline_model: str = Field(pattern=r"^[\w./:@-]{1,100}$")
+    reasoning_model: str = Field(pattern=r"^[\w./:@-]{1,100}$")
+    output_path: str = Field(default="/data/output")
+    delay_ms: int = Field(default=500, ge=100, le=60000)
+    max_concurrent: int = Field(default=3, ge=1, le=10)
+    max_depth: int = Field(default=5, ge=1, le=20)
+    # ... more fields
+```
+
+### Security Validators
+
+- **Output path validation** (CONS-001): Prevents path traversal
+- **Proxy URL validation** (CONS-019): Enforces HTTPS and blocks SSRF
+- **Converter validation**: Checks plugin exists in registry
+
+## Best Practices
+
+1. **Start Conservative**: Use default settings first, then adjust based on results
+2. **Monitor Rate Limits**: Watch for 429 responses and increase `delay_ms`
+3. **Cache for Development**: Enable `use_cache` when testing configurations
+4. **Language Filtering**: Set specific language to reduce noise from multi-language sites
+5. **Output Organization**: Use descriptive `output_path` values like `/data/project-name`
+
+## Related
+
+- [LLM Providers](/guides/llm-providers) - Configure model providers
+- [Output Formats](/guides/output-formats) - Understand markdown vs JSON output
+- [Docker Deployment](/guides/docker-deployment) - Environment variable configuration

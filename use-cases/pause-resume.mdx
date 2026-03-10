@@ -1,0 +1,446 @@
+---
+title: "Pause & Resume Jobs"
+description: "Learn how to pause running jobs, save progress, and resume crawls from checkpoints"
+---
+
+Docrawl supports pausing long-running crawl jobs and resuming them later from a saved checkpoint. This is useful for large documentation sites where you need to stop and restart the crawl without losing progress.
+
+## Overview
+
+The pause/resume system uses a checkpoint-based approach:
+
+1. **Pause**: Signal the job to pause after the current page finishes
+2. **Checkpoint**: Job state is saved to `.job_state.json` in the output directory
+3. **Resume**: Create a new job that processes only the pending URLs from the checkpoint
+
+<Note>
+  Pausing is graceful — the current page finishes processing before the job pauses. This ensures no partial or corrupted output files.
+</Note>
+
+## Quick Start
+
+<Steps>
+  <Step title="Start a Job">
+    ```bash
+    curl -X POST http://localhost:8000/api/jobs \
+      -H "Content-Type: application/json" \
+      -d '{
+        "url": "https://docs.example.com",
+        "output_path": "/data/example-docs"
+      }'
+    ```
+    Response:
+    ```json
+    {"id": "job_abc123", "status": "running"}
+    ```
+  </Step>
+  <Step title="Pause the Job">
+    ```bash
+    curl -X POST http://localhost:8000/api/jobs/job_abc123/pause
+    ```
+    Response:
+    ```json
+    {"id": "job_abc123", "status": "paused", "pages_completed": 42, "pages_total": 150}
+    ```
+  </Step>
+  <Step title="Check the Checkpoint">
+    ```bash
+    cat /data/example-docs/.job_state.json
+    ```
+    See [State File Format](#state-file-format) below
+  </Step>
+  <Step title="Resume from Checkpoint">
+    ```bash
+    curl -X POST http://localhost:8000/api/jobs/resume-from-state \
+      -H "Content-Type: application/json" \
+      -d '{
+        "state_file_path": "/data/example-docs/.job_state.json"
+      }'
+    ```
+    Response:
+    ```json
+    {"id": "job_xyz789", "status": "running", "pages_total": 108}
+    ```
+  </Step>
+</Steps>
+
+## Endpoints
+
+### Pause a Job
+
+```http
+POST /api/jobs/{job_id}/pause
+```
+
+Signals the job to pause after the current page finishes. Returns immediately.
+
+**Response**:
+```json
+{
+  "id": "job_abc123",
+  "status": "paused",
+  "pages_completed": 42,
+  "pages_total": 150
+}
+```
+
+**Error Cases**:
+
+| Status | Description |
+|--------|-------------|
+| `404`  | Job not found |
+| `409`  | Job cannot be paused (already completed, failed, or cancelled) |
+
+<Note>
+  The job status may still show `running` briefly after you call pause. It transitions to `paused` once the current page finishes.
+</Note>
+
+### Resume a Paused Job
+
+```http
+POST /api/jobs/{job_id}/resume
+```
+
+Resumes a paused job **in-place** (continues with the same job ID).
+
+**Response**:
+```json
+{
+  "id": "job_abc123",
+  "status": "running",
+  "pages_completed": 42,
+  "pages_total": 150
+}
+```
+
+**Error Cases**:
+
+| Status | Description |
+|--------|-------------|
+| `404`  | Job not found |
+| `409`  | Job cannot be resumed (not paused) |
+
+<Tip>
+  Use this endpoint if the job is still in memory (e.g., you paused it and want to resume immediately). If the server restarted or the job was cleaned up, use `resume-from-state` instead.
+</Tip>
+
+### Resume from Saved State
+
+```http
+POST /api/jobs/resume-from-state
+```
+
+Creates a **new job** that processes only the pending URLs from a saved state file.
+
+**Request Body**:
+```json
+{
+  "state_file_path": "/data/example-docs/.job_state.json"
+}
+```
+
+**Response**:
+```json
+{
+  "id": "job_xyz789",
+  "status": "running",
+  "pages_total": 108
+}
+```
+
+**Error Cases**:
+
+| Status | Description |
+|--------|-------------|
+| `404`  | State file not found |
+| `422`  | State file is corrupt or missing required fields |
+| `409`  | No pending URLs in state file (job was already complete) |
+| `429`  | Too many active jobs (rate limit) |
+
+<Note>
+  This endpoint creates a **new job ID**. The original job ID is no longer active.
+</Note>
+
+## State File Format
+
+When a job is paused, its state is saved to `{output_path}/.job_state.json`.
+
+### Example State File
+
+```json
+{
+  "job_id": "job_abc123",
+  "request": {
+    "url": "https://docs.example.com",
+    "output_path": "/data/example-docs",
+    "model": "llama3.2:latest",
+    "language": "en",
+    "max_depth": 5
+  },
+  "completed_urls": [
+    "https://docs.example.com/guides/quickstart",
+    "https://docs.example.com/guides/installation",
+    "https://docs.example.com/api/authentication"
+  ],
+  "failed_urls": [
+    "https://docs.example.com/guides/deprecated-page"
+  ],
+  "pending_urls": [
+    "https://docs.example.com/api/endpoints",
+    "https://docs.example.com/api/rate-limits",
+    "https://docs.example.com/concepts/architecture"
+  ]
+}
+```
+
+### Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `job_id` | string | Original job ID (reference only) |
+| `request` | object | Serialized `JobRequest` (original configuration) |
+| `completed_urls` | array | URLs that were successfully processed |
+| `failed_urls` | array | URLs that failed (404, timeout, etc.) |
+| `pending_urls` | array | URLs that haven't been processed yet |
+
+<Note>
+  When you resume from state, **only the `pending_urls` are processed**. Completed and failed URLs are skipped.
+</Note>
+
+## How Checkpoints Work
+
+From `src/jobs/state.py:35-62`:
+
+### Atomic Writes
+
+State files are written atomically to prevent corruption:
+
+```python
+def save_job_state(
+    output_path: Path,
+    job_id: str,
+    request_dict: dict[str, Any],
+    completed_urls: list[str],
+    failed_urls: list[str],
+    pending_urls: list[str],
+) -> Path:
+    state = { ... }
+    state_path = output_path / STATE_FILENAME
+    tmp_path = state_path.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    os.replace(tmp_path, state_path)  # Atomic rename
+    return state_path
+```
+
+**Safety guarantee**: If the process crashes during write, either the old state file remains intact or the new one is complete. No partial writes.
+
+### Loading State
+
+From `src/jobs/state.py:65-86`:
+
+```python
+def load_job_state(state_path: Path) -> JobState:
+    """Load job state from a .job_state.json file.
+    
+    Raises ValueError if the file is corrupt or missing required fields.
+    """
+    data = json.loads(state_path.read_text(encoding="utf-8"))
+    
+    required = {"job_id", "request", "completed_urls", "failed_urls", "pending_urls"}
+    missing = required - set(data.keys())
+    if missing:
+        raise ValueError(f"State file missing fields: {missing}")
+    
+    return JobState(...)
+```
+
+## Use Cases
+
+### Long-Running Crawls
+
+For large documentation sites (500+ pages), you may want to pause and resume:
+
+```bash
+# Start crawl
+curl -X POST http://localhost:8000/api/jobs \
+  -d '{"url": "https://kubernetes.io/docs", "output_path": "/data/k8s-docs"}'
+
+# Let it run for 30 minutes (100 pages completed)
+# Pause for maintenance
+curl -X POST http://localhost:8000/api/jobs/{job_id}/pause
+
+# Resume later (after server restart)
+curl -X POST http://localhost:8000/api/jobs/resume-from-state \
+  -d '{"state_file_path": "/data/k8s-docs/.job_state.json"}'
+```
+
+### Rate Limiting
+
+If you hit rate limits, pause the job and resume later:
+
+```bash
+# Job hits 429 Too Many Requests
+curl -X POST http://localhost:8000/api/jobs/{job_id}/pause
+
+# Wait 1 hour
+sleep 3600
+
+# Resume
+curl -X POST http://localhost:8000/api/jobs/resume-from-state \
+  -d '{"state_file_path": "/data/docs/.job_state.json"}'
+```
+
+### Server Restarts
+
+If the Docrawl server crashes or restarts, you can resume from the last checkpoint:
+
+```bash
+# Server crashed during crawl
+# Restart server
+docker restart docrawl
+
+# Resume from last checkpoint
+curl -X POST http://localhost:8000/api/jobs/resume-from-state \
+  -d '{"state_file_path": "/data/docs/.job_state.json"}'
+```
+
+<Tip>
+  The state file is updated **after every page** is processed. If the server crashes, you only lose progress on the current page.
+</Tip>
+
+### Incremental Updates
+
+If a site changes after your initial crawl, you can resume to only process new/changed pages:
+
+1. **Initial crawl**: Processes 200 pages
+2. **Site adds 50 new pages**
+3. **Resume from state**: Processes only the 50 new URLs
+
+<Note>
+  This requires manually editing the state file to add new URLs to `pending_urls`. This is an advanced use case.
+</Note>
+
+## Limitations
+
+### Sites May Change
+
+Between pause and resume, the documentation site may change:
+
+- **URLs removed**: Result in 404s → added to `failed_urls`
+- **Content updated**: Resumed job sees the new content
+- **URLs added**: Not included in checkpoint (only URLs from original discovery)
+
+<Tip>
+  If you need to capture new URLs, run a fresh discovery instead of resuming from state.
+</Tip>
+
+### Memory-Based Resume vs State-Based Resume
+
+| Method | Endpoint | Job ID | When to Use |
+|--------|----------|--------|-------------|
+| **In-place resume** | `POST /jobs/{job_id}/resume` | Same ID | Job still in memory (immediate resume) |
+| **State-based resume** | `POST /jobs/resume-from-state` | New ID | Server restarted or job cleaned up |
+
+### State File Location
+
+The state file is always saved to `{output_path}/.job_state.json`. If you move or rename the output directory, update the path in your resume request:
+
+```bash
+# Move output directory
+mv /data/old-docs /data/new-docs
+
+# Update path in resume request
+curl -X POST http://localhost:8000/api/jobs/resume-from-state \
+  -d '{"state_file_path": "/data/new-docs/.job_state.json"}'
+```
+
+## Monitoring Pause/Resume
+
+You can monitor the pause/resume process via SSE events:
+
+```bash
+curl -N http://localhost:8000/api/jobs/{job_id}/events
+```
+
+### Example Event Stream
+
+```json
+{"event": "status", "data": {"status": "running", "pages_completed": 42}}
+{"event": "log", "data": "Pause requested, finishing current page..."}
+{"event": "status", "data": {"status": "paused", "pages_completed": 43}}
+{"event": "log", "data": "Job state saved: 43 done, 1 failed, 106 pending"}
+```
+
+### Resume Events
+
+```json
+{"event": "log", "data": "Resuming from state: 106 pending URLs"}
+{"event": "status", "data": {"status": "running", "pages_total": 106}}
+{"event": "progress", "data": {"completed": 1, "total": 106}}
+```
+
+## Best Practices
+
+<Tip>
+  **Pause gracefully**: Always use the pause endpoint rather than killing the process. This ensures the state file is written correctly.
+</Tip>
+
+<Tip>
+  **Backup state files**: Copy `.job_state.json` to a safe location before resuming, in case something goes wrong.
+</Tip>
+
+<Tip>
+  **Check pending URLs**: Before resuming, check the `pending_urls` array in the state file to verify what will be processed.
+</Tip>
+
+## Troubleshooting
+
+### State File Not Found
+
+```json
+{"detail": "State file not found: /data/docs/.job_state.json"}
+```
+
+**Causes**:
+- Output directory was deleted
+- State file was manually removed
+- Job was never paused (state file only created on pause)
+
+**Solution**: Run a new crawl from scratch
+
+### State File Corrupt
+
+```json
+{"detail": "State file missing fields: {'pending_urls', 'request'}"}
+```
+
+**Causes**:
+- File was manually edited and corrupted
+- Write was interrupted (very rare due to atomic writes)
+
+**Solution**: Restore from backup or run a new crawl
+
+### No Pending URLs
+
+```json
+{"detail": "No pending URLs in state file — job was complete."}
+```
+
+**Cause**: The job finished before you tried to resume
+
+**Solution**: Check `completed_urls` in the state file to see what was processed
+
+## API Reference
+
+See the full API documentation:
+
+- [POST /jobs/{job_id}/pause](/api-reference/endpoints/jobs#pause-job) - Pause endpoint details
+- [POST /jobs/{job_id}/resume](/api-reference/endpoints/jobs#resume-job) - Resume endpoint details  
+- [POST /jobs/resume-from-state](/api-reference/endpoints/jobs#resume-from-state) - State-based resume details
+- [Job State Models](/api-reference/models/job-status) - Status and state schemas
+
+## Related
+
+- [Job Management](/guides/configuration#job-management) - Configure job limits and timeouts
+- [Event Streaming](/api-reference/endpoints/events) - Monitor job progress in real-time
+- [Error Handling](/advanced/troubleshooting#failed-pages) - Handle failed URLs

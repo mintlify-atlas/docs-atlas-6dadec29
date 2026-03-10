@@ -1,0 +1,702 @@
+---
+title: Troubleshooting
+description: Common issues, diagnostic commands, and solutions for Docrawl deployment and operation
+---
+
+# Troubleshooting Guide
+
+Common issues and their solutions, organized by category. Use the diagnostic commands to identify root causes.
+
+## Quick Diagnostics
+
+<CodeGroup>
+
+```bash Check Job Status
+curl http://localhost:8002/api/jobs/{job_id}/status
+```
+
+```bash View Real-Time Logs
+docker compose logs -f docrawl
+```
+
+```bash Check Resource Usage
+docker stats docrawl
+```
+
+```bash Test Ollama Connection
+curl http://localhost:11434/api/tags
+```
+
+```bash Test LM Studio Connection
+curl http://localhost:1234/v1/models
+```
+
+</CodeGroup>
+
+## Ollama Issues
+
+<AccordionGroup>
+  <Accordion title="No models available or empty model list">
+    **Symptoms**: UI shows "No ollama models available" or model dropdown is empty.
+    
+    **Cause**: Ollama is not running or has no models pulled.
+    
+    **Solution**:
+    
+    ```bash
+    # 1. Check if Ollama is running
+    ollama list
+    
+    # If command not found, install Ollama:
+    curl -fsSL https://ollama.ai/install.sh | sh
+    
+    # 2. Start Ollama service (if not running)
+    ollama serve
+    
+    # 3. Pull at least one model
+    ollama pull mistral:7b        # Good for crawl
+    ollama pull qwen2.5:14b       # Good for pipeline
+    ollama pull deepseek-r1:7b    # Good for reasoning
+    
+    # 4. Verify models are available
+    ollama list
+    ```
+  </Accordion>
+  
+  <Accordion title="Connection refused to Ollama">
+    **Symptoms**: Error `Cannot connect to Ollama at http://host.docker.internal:11434`
+    
+    **Cause**: Docker cannot reach the host's Ollama service.
+    
+    **Solutions**:
+    
+    **1. Check Ollama is running on host**:
+    ```bash
+    curl http://localhost:11434/api/tags
+    ```
+    
+    **2. On Linux, add OLLAMA_HOST**:
+    ```bash
+    export OLLAMA_HOST=0.0.0.0
+    pkill ollama
+    ollama serve &
+    ```
+    
+    **3. Docker Desktop users** - `host.docker.internal` should work automatically.
+    
+    **4. Linux users without Docker Desktop** - Ensure docker-compose has:
+    ```yaml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ```
+  </Accordion>
+  
+  <Accordion title="Model not found error">
+    **Symptoms**: `Error: model "xyz" not found`
+    
+    **Solution**:
+    ```bash
+    ollama pull <model-name>
+    ```
+    
+    Verify the model name:
+    ```bash
+    ollama list
+    ```
+  </Accordion>
+  
+  <Accordion title="Ollama timeout errors">
+    **Symptoms**: `TimeoutError` when calling Ollama for cleanup.
+    
+    **Causes**:
+    - Model is too large for available RAM/VRAM
+    - No GPU acceleration (CPU inference is slow)
+    - Chunk size exceeds model's context window
+    
+    **Solutions**:
+    
+    ```bash
+    # 1. Check Ollama logs for OOM errors
+    journalctl -u ollama -f
+    
+    # 2. Use a smaller model
+    # Instead of qwen2.5:32b, use:
+    ollama pull qwen2.5:14b
+    
+    # 3. Enable GPU layers
+    export OLLAMA_GPU_LAYERS=35
+    
+    # 4. Increase timeout (in job request)
+    # Docrawl uses dynamic timeouts, but you can adjust base:
+    # BASE_TIMEOUT = 45 seconds (hardcoded)
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## LM Studio Issues
+
+<AccordionGroup>
+  <Accordion title="Models not appearing in dropdown">
+    **Symptoms**: LM Studio selected as provider but model list is empty.
+    
+    **Causes & Solutions**:
+    
+    **1. LM Studio server not running**:
+    - Open LM Studio
+    - Click "Start Server" in the Local Server tab
+    
+    **2. Wrong port**:
+    ```bash
+    # Default is 1234. Verify with:
+    curl http://localhost:1234/v1/models
+    
+    # If using a custom port, update .env:
+    LMSTUDIO_URL=http://localhost:5000/v1
+    ```
+    
+    **3. No model loaded**:
+    - LM Studio must have at least one model loaded before starting the server
+    
+    **4. Docker networking**:
+    ```bash
+    # When running Docrawl in Docker:
+    LMSTUDIO_URL=http://host.docker.internal:1234/v1
+    ```
+  </Accordion>
+  
+  <Accordion title="Connection refused to LM Studio">
+    **Symptoms**: Error connecting to LM Studio endpoint.
+    
+    **Solutions**:
+    
+    **1. Check the server is running**:
+    ```bash
+    curl http://localhost:1234/v1/models
+    ```
+    
+    **2. Check firewall**:
+    - LM Studio binds to `localhost` by default
+    - If running in a VM or WSL, ensure port 1234 is forwarded
+    
+    **3. API key mismatch**:
+    ```bash
+    # If you set a custom API key in LM Studio:
+    LMSTUDIO_API_KEY=your-custom-key
+    ```
+  </Accordion>
+  
+  <Accordion title="Model prefix issues">
+    **Symptoms**: Model runs on wrong provider or `model not found` errors.
+    
+    **Solution**: Prefix model names with `lmstudio/`:
+    
+    ```json
+    {
+      "crawl_model": "lmstudio/mistral-7b-instruct"
+    }
+    ```
+    
+    Bare model names (without prefix) default to Ollama.
+  </Accordion>
+</AccordionGroup>
+
+## Docker Issues
+
+<AccordionGroup>
+  <Accordion title="Container exits immediately">
+    **Symptoms**: `docker compose up` shows container starting then immediately exiting.
+    
+    **Solution**:
+    
+    ```bash
+    # Check logs for error message
+    docker compose logs docrawl
+    
+    # Common fixes:
+    
+    # 1. Port 8002 already in use
+    lsof -i :8002
+    # Kill the process or change port in docker-compose.yml
+    
+    # 2. Missing data directory
+    mkdir -p ./data
+    
+    # 3. Rebuild from scratch
+    docker compose down -v
+    docker compose build --no-cache
+    docker compose up
+    ```
+  </Accordion>
+  
+  <Accordion title="Permission denied creating files">
+    **Symptoms**: Container logs show `PermissionError: [Errno 13] Permission denied`
+    
+    **Solution**:
+    
+    ```bash
+    # Fix ownership of data directory
+    sudo chown -R $(id -u):$(id -g) ./data
+    
+    # Verify permissions
+    ls -la ./data
+    ```
+  </Accordion>
+  
+  <Accordion title="Playwright browser fails to start">
+    **Symptoms**: `browserType.launch: Executable doesn't exist` or similar Playwright errors.
+    
+    **Solution**:
+    
+    ```bash
+    # For local development (non-Docker):
+    pip install playwright
+    playwright install chromium
+    playwright install-deps
+    
+    # For Docker:
+    # Rebuild the image (playwright install runs during build)
+    docker compose build --no-cache
+    ```
+  </Accordion>
+  
+  <Accordion title="Out of memory (OOMKilled)">
+    **Symptoms**: Container killed or `OOMKilled` in `docker inspect`.
+    
+    **Solutions**:
+    
+    ```bash
+    # 1. Check Docker memory limit
+    docker info | grep Memory
+    
+    # 2. Increase memory in Docker Desktop:
+    # Settings → Resources → Memory → 8GB minimum
+    
+    # 3. Or via docker-compose.yml:
+    services:
+      docrawl:
+        deploy:
+          resources:
+            limits:
+              memory: 8G
+    
+    # 4. Use a smaller model
+    # 7B models use ~4GB RAM vs 14B using ~8GB
+    
+    # 5. Reduce PAGE_POOL_SIZE
+    # Each page uses ~200MB
+    PAGE_POOL_SIZE=3
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Network Issues
+
+<AccordionGroup>
+  <Accordion title="Timeout errors during crawling">
+    **Symptoms**: `TimeoutError` or `Navigation timeout of 30000 ms exceeded`
+    
+    **Solutions**:
+    
+    ```bash
+    # 1. Check network connectivity from container
+    docker exec -it docrawl curl -I https://example.com
+    
+    # 2. Check if the site is blocking you
+    curl -I -A "Mozilla/5.0" https://target-site.com
+    
+    # 3. Increase timeout in job request
+    # Playwright navigation timeout is hardcoded to 30s
+    # For slow sites, use delay_ms:
+    {
+      "delay_ms": 2000  # 2 second delay between requests
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="DNS resolution failures">
+    **Symptoms**: `Error: getaddrinfo ENOTFOUND`
+    
+    **Solutions**:
+    
+    ```bash
+    # 1. Check Docker DNS settings
+    cat /etc/docker/daemon.json
+    # Add:
+    {
+      "dns": ["8.8.8.8", "1.1.1.1"]
+    }
+    
+    # 2. Restart Docker
+    sudo systemctl restart docker
+    
+    # 3. Test resolution from container
+    docker exec -it docrawl nslookup example.com
+    ```
+  </Accordion>
+  
+  <Accordion title="SSL/TLS certificate errors">
+    **Symptoms**: `SSL: CERTIFICATE_VERIFY_FAILED`
+    
+    **Solution** (development only):
+    
+    <Warning>
+      Disabling SSL verification is a **security risk**. Only use in development.
+    </Warning>
+    
+    ```bash
+    # Development only:
+    export PYTHONHTTPSVERIFY=0
+    
+    # Production: Fix the certificate issue
+    # - Update CA certificates
+    # - Use a reverse proxy with valid certs
+    ```
+  </Accordion>
+  
+  <Accordion title="SSRF validation blocking valid URLs">
+    **Symptoms**: `ValueError: URL targets private/internal address`
+    
+    **Cause**: SSRF protection is blocking URLs that resolve to private networks.
+    
+    **Solution**:
+    
+    This is **intentional security behavior**. If you need to crawl internal documentation:
+    
+    1. **Disable SSRF validation** (not recommended):
+       - Requires code modification in `src/utils/security.py`
+    
+    2. **Use a public-facing URL** instead of internal hostnames
+    
+    3. **Run Docrawl inside the private network** and expose only the results
+  </Accordion>
+</AccordionGroup>
+
+## Performance Issues
+
+<AccordionGroup>
+  <Accordion title="Crawling is very slow">
+    **Symptoms**: &lt;10 pages/minute throughput
+    
+    **Solutions**:
+    
+    ```bash
+    # 1. Check system resources
+    docker stats docrawl
+    # If CPU >90% or memory near limit, increase resources
+    
+    # 2. Use a smaller/faster model
+    # mistral:7b is 3x faster than qwen2.5:32b
+    
+    # 3. Increase concurrency
+    {
+      "max_concurrent": 5
+    }
+    
+    # 4. Enable page pool if disabled
+    PAGE_POOL_SIZE=10
+    
+    # 5. Check if GPU acceleration is working
+    nvidia-smi  # Should show ollama process
+    
+    # 6. Enable pipeline mode for large sites
+    {
+      "use_pipeline_mode": true
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="High disk usage">
+    **Symptoms**: `/data` directory consuming excessive space
+    
+    **Solutions**:
+    
+    ```bash
+    # 1. Check disk usage
+    du -sh ./data/*
+    
+    # 2. Remove old crawl results
+    rm -rf ./data/old-domain-*
+    
+    # 3. Clear page cache
+    rm -rf ./data/.page_cache/
+    
+    # 4. Clean Docker system
+    docker system prune -f
+    ```
+  </Accordion>
+  
+  <Accordion title="Job stuck in discovery phase">
+    **Symptoms**: Job stuck in discovery for 5+ minutes
+    
+    **Causes**:
+    - No sitemap available → falls back to recursive crawl
+    - Large site with deep hierarchy
+    - LLM filtering thousands of URLs
+    
+    **Solutions**:
+    
+    ```json
+    {
+      "max_depth": 2,  // Limit recursion
+      "filter_sitemap_by_path": true  // Skip LLM for sitemap URLs
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Page Cache Issues
+
+<AccordionGroup>
+  <Accordion title="Stale content being served">
+    **Symptoms**: Crawl results don't reflect recent changes on the target site.
+    
+    **Cause**: Page cache (24h TTL) is returning cached content.
+    
+    **Solutions**:
+    
+    ```bash
+    # 1. Disable cache for this job
+    {
+      "use_cache": false
+    }
+    
+    # 2. Clear the cache
+    rm -rf ./data/.page_cache/
+    
+    # 3. Wait for TTL expiry (24 hours)
+    ```
+  </Accordion>
+  
+  <Accordion title="Cache HIT/MISS in logs">
+    **Info**: When cache is enabled, logs show `[CACHE HIT]` or `[CACHE MISS]` per page.
+    
+    This is **normal behavior**:
+    - High HIT ratio = site unchanged since last crawl
+    - High MISS ratio = fresh content being fetched
+    
+    No action needed.
+  </Accordion>
+</AccordionGroup>
+
+## Pause / Resume Issues
+
+<AccordionGroup>
+  <Accordion title="Pause returns 409 Conflict">
+    **Symptoms**: `POST /api/jobs/{id}/pause` returns `409 Conflict`.
+    
+    **Cause**: Job is not in a pausable state. Only `running` jobs can be paused.
+    
+    **Solution**:
+    
+    ```bash
+    # Check job status first
+    curl http://localhost:8002/api/jobs/{id}/status
+    
+    # Valid states for pause:
+    # - "running"
+    
+    # Cannot pause:
+    # - "completed"
+    # - "failed"
+    # - "cancelled"
+    ```
+  </Accordion>
+  
+  <Accordion title="Resume fails or restarts from beginning">
+    **Symptoms**: Resumed job re-scrapes already-completed pages.
+    
+    **Cause**: Checkpoint file `.job_state.json` is missing or corrupted.
+    
+    **Solutions**:
+    
+    ```bash
+    # 1. Check checkpoint exists
+    ls -la ./data/{job_id}/.job_state.json
+    
+    # 2. Verify checkpoint content
+    cat ./data/{job_id}/.job_state.json | jq '.completed_urls | length'
+    # Should show count of completed pages
+    
+    # 3. If checkpoint is lost, enable cache to skip re-scraping
+    {
+      "use_cache": true
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Job state not persisted after crash">
+    **Cause**: Automatic resume on server restart is not yet implemented (Roadmap v1.0.0).
+    
+    **Workaround**:
+    
+    ```bash
+    # After restarting Docrawl, manually call resume:
+    curl -X POST http://localhost:8002/api/jobs/{job_id}/resume
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## API Errors
+
+<AccordionGroup>
+  <Accordion title="403 Forbidden responses">
+    **Symptoms**: API calls return `403 Forbidden` responses.
+    
+    **Causes & Solutions**:
+    
+    **1. Target site blocks crawlers**:
+    ```bash
+    # Check robots.txt
+    curl https://target-site.com/robots.txt
+    ```
+    
+    **2. Rate limiting**:
+    ```json
+    {
+      "delay_ms": 2000,  // Add 2s delay between requests
+      "respect_robots_txt": true
+    }
+    ```
+    
+    **3. User-Agent blocking**:
+    - Some sites block the default `DocRawl/0.9.10` user agent
+    - Currently not configurable (hardcoded in `src/scraper/page.py:29`)
+  </Accordion>
+  
+  <Accordion title="429 Too Many Requests">
+    **Symptoms**: `429 Too Many Requests` from Docrawl API.
+    
+    **Causes**:
+    
+    **1. Rate limit exceeded**:
+    - 10 jobs/minute per IP
+    - Wait 1 minute and retry
+    
+    **2. Concurrent job limit reached**:
+    - Default: 5 active jobs maximum
+    - Wait for a job to complete or increase `MAX_CONCURRENT_JOBS`:
+    
+    ```bash
+    MAX_CONCURRENT_JOBS=10
+    ```
+  </Accordion>
+  
+  <Accordion title="401 Unauthorized">
+    **Symptoms**: `401 Unauthorized — X-Api-Key required`
+    
+    **Cause**: API key authentication is enabled but key is missing or invalid.
+    
+    **Solution**:
+    
+    ```bash
+    # Include X-Api-Key header
+    curl -X POST http://localhost:8002/api/jobs \
+      -H "X-Api-Key: your-secret-key" \
+      -H "Content-Type: application/json" \
+      -d '{...}'
+    
+    # Or disable auth (development only)
+    # Remove API_KEY from environment
+    ```
+  </Accordion>
+  
+  <Accordion title="500 Internal Server Error">
+    **Symptoms**: `500 Internal Server Error` with generic error message.
+    
+    **Solution**:
+    
+    ```bash
+    # Check container logs for full error
+    docker compose logs -f docrawl
+    
+    # Look for "unhandled_exception" entries with stack traces
+    docker compose logs docrawl | grep unhandled_exception
+    
+    # Common causes:
+    # - Missing environment variables
+    # - Invalid Pydantic model validation
+    # - LLM service connection failure
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Output Issues
+
+<AccordionGroup>
+  <Accordion title="Missing or incomplete output files">
+    **Symptoms**: Expected markdown files not created in `/data`.
+    
+    **Solutions**:
+    
+    ```bash
+    # 1. Check job status
+    curl http://localhost:8002/api/jobs/{id}/status
+    # Ensure status is "completed" not "failed"
+    
+    # 2. Check output directory permissions
+    ls -la ./data/{domain}/
+    
+    # 3. Check logs for write errors
+    docker compose logs docrawl | grep PermissionError
+    
+    # 4. Verify job didn't fail during scraping phase
+    # SSE events will show "failed" status
+    ```
+  </Accordion>
+  
+  <Accordion title="Markdown quality is poor">
+    **Symptoms**: Output contains navigation residue, broken formatting, or missing content.
+    
+    **Solutions**:
+    
+    ```json
+    // 1. Use a stronger pipeline model
+    {
+      "pipeline_model": "openrouter/anthropic/claude-3.5-sonnet"
+    }
+    
+    // 2. Try heavy cleanup tier
+    // Manually check if content has broken tables/LaTeX
+    
+    // 3. Disable HTTP fast-path (may produce lower quality)
+    {
+      "use_http_fast_path": false
+    }
+    
+    // 4. Try a different converter
+    {
+      "converter": "markdownify"  // Default
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Still Having Issues?
+
+<CardGroup cols={2}>
+  <Card title="View Logs" icon="terminal">
+    ```bash
+    docker compose logs -f docrawl
+    ```
+  </Card>
+  
+  <Card title="Open an Issue" icon="github" href="https://github.com/plater7/docrawl/issues">
+    Report bugs or request features on GitHub
+  </Card>
+  
+  <Card title="Check Existing Issues" icon="magnifying-glass" href="https://github.com/plater7/docrawl/issues">
+    Your problem may already have a solution
+  </Card>
+  
+  <Card title="Performance Guide" icon="gauge" href="/advanced/performance">
+    Optimize crawl speed and resource usage
+  </Card>
+</CardGroup>
+
+<Warning>
+  **When reporting issues**, include:
+  - OS and Docker version
+  - Full error message from logs
+  - Steps to reproduce
+  - Job request JSON (sanitize any API keys)
+</Warning>

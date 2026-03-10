@@ -1,0 +1,350 @@
+---
+title: "Job Events"
+description: "Server-Sent Events (SSE) stream for real-time job progress updates"
+---
+
+Docrawl provides real-time job progress updates via Server-Sent Events (SSE). Connect to the `/jobs/{job_id}/events` endpoint to receive a continuous stream of events as the job progresses through different phases.
+
+## Event Types
+
+All events follow the SSE format with an `event` type and JSON `data` payload.
+
+### `phase_change`
+
+Emitted when the job transitions to a new processing phase.
+
+<ResponseField name="phase" type="string" required>
+  Current phase of the job:
+  - `init` - Initializing browser and validating models
+  - `discovery` - Crawling site structure (sitemap, links)
+  - `filtering` - Filtering URLs (basic rules, robots.txt, LLM)
+  - `scraping` - Fetching and converting pages to markdown
+  - `cleanup` - Running LLM cleanup on markdown chunks
+  - `save` - Writing files to disk
+  - `done` - Job completed successfully
+  - `failed` - Job failed with error
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Human-readable description of the current phase.
+</ResponseField>
+
+<ResponseField name="active_model" type="string">
+  LLM model being used in this phase (present during filtering and cleanup phases).
+  
+  **Example:** `mistral:latest`, `qwen3-coder:free`
+</ResponseField>
+
+<ResponseField name="progress" type="string">
+  Progress indicator in `current/total` format (present during scraping phase).
+  
+  **Example:** `"15/42"`
+</ResponseField>
+
+<ResponseField name="url" type="string">
+  Current URL being processed (present during scraping/cleanup phases).
+</ResponseField>
+
+**Example:**
+```json
+{
+  "event": "phase_change",
+  "data": {
+    "phase": "scraping",
+    "message": "Processing 42 pages...",
+    "progress": "15/42"
+  }
+}
+```
+
+### `log`
+
+Detailed log messages about specific operations within a phase.
+
+<ResponseField name="phase" type="string" required>
+  The phase this log belongs to.
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Log message with operational details.
+</ResponseField>
+
+<ResponseField name="level" type="string" default="info">
+  Log level: `info`, `warning`, or `error`.
+</ResponseField>
+
+<ResponseField name="active_model" type="string">
+  LLM model used for this operation (if applicable).
+</ResponseField>
+
+**Example:**
+```json
+{
+  "event": "log",
+  "data": {
+    "phase": "scraping",
+    "message": "[15/42] Loaded https://docs.example.com/api (1.2s, 3 chunks, playwright)",
+    "level": "info"
+  }
+}
+```
+
+### `job_done`
+
+Terminal event indicating the job has finished (successfully or with failure).
+
+<ResponseField name="status" type="string" required>
+  Final status: `completed`, `failed`, or `cancelled`.
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  Error message (only present if status is `failed`).
+</ResponseField>
+
+<ResponseField name="pages_ok" type="integer">
+  Number of pages processed successfully without any chunk failures.
+</ResponseField>
+
+<ResponseField name="pages_partial" type="integer">
+  Number of pages processed with some LLM cleanup failures (raw markdown used for failed chunks).
+</ResponseField>
+
+<ResponseField name="pages_failed" type="integer">
+  Number of pages that failed to process entirely.
+</ResponseField>
+
+<ResponseField name="pages_skipped" type="integer">
+  Number of pages skipped due to duplicate content detection.
+</ResponseField>
+
+<ResponseField name="pages_blocked" type="integer">
+  Number of pages blocked by bot detection or captcha.
+</ResponseField>
+
+<ResponseField name="pages_native_md" type="integer">
+  Pages fetched as native markdown via content negotiation.
+</ResponseField>
+
+<ResponseField name="pages_proxy_md" type="integer">
+  Pages fetched via markdown proxy service.
+</ResponseField>
+
+<ResponseField name="pages_http_fast" type="integer">
+  Pages fetched via plain HTTP (fast path).
+</ResponseField>
+
+<ResponseField name="pages_playwright" type="integer">
+  Pages fetched using Playwright browser automation.
+</ResponseField>
+
+<ResponseField name="cache_hits" type="integer">
+  Number of pages served from disk cache (if caching enabled).
+</ResponseField>
+
+<ResponseField name="cache_misses" type="integer">
+  Number of cache misses (if caching enabled).
+</ResponseField>
+
+<ResponseField name="output_path" type="string">
+  Directory where files were written.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Summary message.
+</ResponseField>
+
+**Example (Success):**
+```json
+{
+  "event": "job_done",
+  "data": {
+    "status": "completed",
+    "pages_ok": 38,
+    "pages_partial": 2,
+    "pages_failed": 1,
+    "pages_skipped": 1,
+    "pages_blocked": 0,
+    "pages_native_md": 5,
+    "pages_proxy_md": 0,
+    "pages_http_fast": 20,
+    "pages_playwright": 17,
+    "cache_hits": 0,
+    "cache_misses": 0,
+    "output_path": "/data/output/example-docs",
+    "message": "Done: 38 ok, 2 partial, 1 failed"
+  }
+}
+```
+
+**Example (Failure):**
+```json
+{
+  "event": "job_done",
+  "data": {
+    "status": "failed",
+    "error": "Model validation failed: Model 'invalid-model' not found"
+  }
+}
+```
+
+### `job_cancelled`
+
+Emitted when a job is cancelled via the `POST /jobs/{job_id}/cancel` endpoint.
+
+<ResponseField name="pages_completed" type="integer">
+  Number of pages completed before cancellation.
+</ResponseField>
+
+<ResponseField name="pages_total" type="integer">
+  Total pages that were queued.
+</ResponseField>
+
+<ResponseField name="output_path" type="string">
+  Directory where partial results were written.
+</ResponseField>
+
+**Example:**
+```json
+{
+  "event": "job_cancelled",
+  "data": {
+    "pages_completed": 15,
+    "pages_total": 42,
+    "output_path": "/data/output/example-docs"
+  }
+}
+```
+
+### `keepalive`
+
+Sent every 20 seconds during periods of no activity to prevent connection timeouts.
+
+**Example:**
+```json
+{
+  "event": "keepalive",
+  "data": {}
+}
+```
+
+## Event Stream Lifecycle
+
+A typical job progresses through events in this order:
+
+1. **Initialization**
+   - `phase_change` → `init` (validating models)
+   - `phase_change` → `init` (initializing browser)
+   - `log` → robots.txt loaded
+
+2. **Discovery**
+   - `phase_change` → `discovery` (crawling site structure)
+   - `log` → found X URLs
+
+3. **Filtering**
+   - `phase_change` → `filtering` (basic filters)
+   - `log` → basic filtering results
+   - `log` → robots.txt filtering
+   - `phase_change` → `filtering` (LLM filtering)
+   - `log` → LLM filtering results
+
+4. **Processing** (per page)
+   - `phase_change` → `scraping` (loading page)
+   - `log` → page loaded with stats
+   - `phase_change` → `cleanup` (cleaning chunks)
+   - `log` → chunk cleanup progress
+   - `log` → file saved
+
+5. **Completion**
+   - `phase_change` → `done`
+   - `job_done` → final statistics
+
+## Client Implementation
+
+### JavaScript (EventSource API)
+
+```javascript
+const eventSource = new EventSource(`/jobs/${jobId}/events`);
+
+eventSource.addEventListener('phase_change', (e) => {
+  const data = JSON.parse(e.data);
+  console.log(`Phase: ${data.phase} - ${data.message}`);
+  updateUI(data);
+});
+
+eventSource.addEventListener('log', (e) => {
+  const data = JSON.parse(e.data);
+  appendLog(data.message, data.level);
+});
+
+eventSource.addEventListener('job_done', (e) => {
+  const data = JSON.parse(e.data);
+  if (data.status === 'completed') {
+    showSuccess(data);
+  } else {
+    showError(data.error);
+  }
+  eventSource.close();
+});
+
+eventSource.onerror = (error) => {
+  console.error('SSE error:', error);
+  eventSource.close();
+};
+```
+
+### Python (httpx-sse)
+
+```python
+import httpx
+from httpx_sse import connect_sse
+import json
+
+with httpx.Client() as client:
+    with connect_sse(client, "GET", f"http://localhost:8000/jobs/{job_id}/events") as event_source:
+        for sse in event_source.iter_sse():
+            event_type = sse.event
+            data = json.loads(sse.data)
+            
+            if event_type == "phase_change":
+                print(f"Phase: {data['phase']} - {data['message']}")
+            elif event_type == "log":
+                print(f"[{data.get('level', 'info').upper()}] {data['message']}")
+            elif event_type == "job_done":
+                print(f"Job {data['status']}: {data.get('message', '')}")
+                break
+```
+
+### cURL
+
+```bash
+curl -N http://localhost:8000/jobs/{job_id}/events
+```
+
+## Connection Details
+
+<Info>
+  The SSE endpoint includes a 15-second ping interval to keep the connection alive through proxies and load balancers.
+</Info>
+
+<Note>
+  The event stream automatically closes after emitting a terminal event (`job_done`, `job_cancelled`, or `job_error`).
+</Note>
+
+<Warning>
+  If the job runner crashes without emitting a terminal event, the stream will detect this after a 20-second timeout and emit a synthetic `job_done` event with status `failed`.
+</Warning>
+
+## Error Handling
+
+Clients should handle these scenarios:
+
+1. **Connection errors** - Network issues, server unavailable
+2. **404 Not Found** - Job ID doesn't exist or has been cleaned up
+3. **Premature disconnection** - Job may still be running; can reconnect or poll status endpoint
+4. **Failed jobs** - Check the `error` field in `job_done` event
+
+## Related Endpoints
+
+- [Create Job](/api-reference/endpoints/create-job) - Start a new crawl job
+- [Get Job Status](/api-reference/endpoints/get-status) - Poll for status updates
+- [Cancel Job](/api-reference/endpoints/cancel-job) - Stop a running job

@@ -1,0 +1,458 @@
+---
+title: 'Docker Deployment'
+description: 'Deploy Docrawl in production using Docker Compose'
+---
+
+Docrawl is designed for Docker deployment with a single-command setup. This guide covers production deployment, configuration, and optimization.
+
+## Quick Start
+
+```bash
+git clone https://github.com/plater7/docrawl.git
+cd docrawl
+./setup.sh  # Verifies Docker, memory, creates ./data directory
+docker compose up --build
+```
+
+Access the UI at `http://localhost:8002`
+
+## Docker Compose Configuration
+
+The `docker-compose.yml` file defines the Docrawl service:
+
+```yaml docker-compose.yml
+services:
+  docrawl:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "127.0.0.1:8002:8002"
+    volumes:
+      - ./data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - OLLAMA_URL=http://host.docker.internal:11434
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENCODE_API_KEY=${OPENCODE_API_KEY:-}
+      - API_KEY=${API_KEY:-}
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
+      - MAX_CONCURRENT_JOBS=${MAX_CONCURRENT_JOBS:-5}
+      - LMSTUDIO_URL=${LMSTUDIO_URL:-}
+      - LMSTUDIO_API_KEY=${LMSTUDIO_API_KEY:-}
+    restart: unless-stopped
+    shm_size: '2gb'
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/api/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+```
+
+## Environment Variables
+
+### LLM Provider Configuration
+
+<ParamField path="OLLAMA_URL" type="string" default="http://localhost:11434">
+  URL where Ollama server is running.
+  
+  For Docker: Use `http://host.docker.internal:11434` to access host Ollama.
+  
+  ```bash .env
+  OLLAMA_URL=http://host.docker.internal:11434
+  ```
+</ParamField>
+
+<ParamField path="OPENROUTER_API_KEY" type="string" default="">
+  OpenRouter API key for cloud LLM access.
+  
+  Get yours at [openrouter.ai/keys](https://openrouter.ai/keys)
+  
+  ```bash .env
+  OPENROUTER_API_KEY=sk-or-v1-...
+  ```
+</ParamField>
+
+<ParamField path="OPENCODE_API_KEY" type="string" default="">
+  OpenCode API key for cloud LLM access.
+  
+  ```bash .env
+  OPENCODE_API_KEY=...
+  ```
+</ParamField>
+
+<ParamField path="LMSTUDIO_URL" type="string" default="http://localhost:1234/v1">
+  LM Studio server URL.
+  
+  For Docker: Use `http://host.docker.internal:1234/v1`
+  
+  ```bash .env
+  LMSTUDIO_URL=http://host.docker.internal:1234/v1
+  ```
+</ParamField>
+
+<ParamField path="LMSTUDIO_API_KEY" type="string" default="">
+  Optional LM Studio API key.
+  
+  ```bash .env
+  LMSTUDIO_API_KEY=
+  ```
+</ParamField>
+
+### Security Configuration
+
+<ParamField path="API_KEY" type="string" default="">
+  API key required for all endpoints. If empty, authentication is disabled.
+  
+  Generate a secure key:
+  ```bash
+  openssl rand -hex 32
+  ```
+  
+  Clients must send: `X-Api-Key: <value>`
+  
+  ```bash .env
+  API_KEY=your-secret-api-key
+  ```
+</ParamField>
+
+<ParamField path="CORS_ORIGINS" type="string" default="">
+  Comma-separated list of allowed CORS origins.
+  
+  ```bash .env
+  CORS_ORIGINS=https://myapp.example.com,http://localhost:3000
+  ```
+  
+  If empty, only same-origin requests are allowed.
+</ParamField>
+
+### Performance Configuration
+
+<ParamField path="MAX_CONCURRENT_JOBS" type="integer" default={5}>
+  Maximum number of concurrent crawl jobs.
+  
+  ```bash .env
+  MAX_CONCURRENT_JOBS=5
+  ```
+</ParamField>
+
+<ParamField path="PAGE_POOL_SIZE" type="integer" default={5}>
+  Size of Playwright page pool for connection reuse.
+  
+  Set to `0` to disable pooling (legacy per-page create/close).
+  
+  ```bash .env
+  PAGE_POOL_SIZE=5
+  ```
+  
+  See `src/main.py:pool_size`
+</ParamField>
+
+<ParamField path="LOG_LEVEL" type="string" default="INFO">
+  Logging verbosity level.
+  
+  Options: `DEBUG`, `INFO`, `WARNING`, `ERROR`
+  
+  ```bash .env
+  LOG_LEVEL=DEBUG
+  ```
+</ParamField>
+
+### Cloudflare Tunnel (Optional)
+
+<ParamField path="CLOUDFLARE_TUNNEL_TOKEN" type="string" default="">
+  Token for Cloudflare Tunnel to expose Docrawl publicly.
+  
+  ```bash .env
+  CLOUDFLARE_TUNNEL_TOKEN=eyJhIjoiY...
+  ```
+  
+  See the "Public Access" section below.
+</ParamField>
+
+## Volume Mounts
+
+### Data Directory
+
+```yaml
+volumes:
+  - ./data:/data
+```
+
+The `./data` directory on your host is mapped to `/data` in the container. All crawl output is stored here.
+
+**Structure:**
+```
+./data/
+├── example.com/
+│   ├── introduction.md
+│   ├── getting-started.md
+│   ├── api/
+│   │   ├── endpoints.md
+│   │   └── authentication.md
+│   └── _index.md
+└── another-site.com/
+    └── ...
+```
+
+<Note>
+The `./data` directory is created by `setup.sh`. Ensure it exists and has proper permissions before starting Docker.
+</Note>
+
+## Resource Limits
+
+### Shared Memory
+
+```yaml
+shm_size: '2gb'
+```
+
+Playwright requires sufficient shared memory for browser operations. 2GB prevents crashes on large pages.
+
+<Warning>
+Do not reduce below 1GB or you may encounter browser crashes.
+</Warning>
+
+### Memory Limits
+
+```yaml
+deploy:
+  resources:
+    limits:
+      memory: 4G
+    reservations:
+      memory: 2G
+```
+
+- **Reservation**: Guaranteed memory (2GB minimum)
+- **Limit**: Maximum memory (4GB cap)
+
+Adjust based on your system:
+- **Minimum**: 4GB total RAM
+- **Recommended**: 8GB+ total RAM
+
+## Port Configuration
+
+```yaml
+ports:
+  - "127.0.0.1:8002:8002"
+```
+
+Binds port 8002 to localhost only. To expose to your network:
+
+```yaml
+ports:
+  - "0.0.0.0:8002:8002"
+```
+
+<Warning>
+Exposing to `0.0.0.0` without setting `API_KEY` allows anyone on your network to create crawl jobs.
+</Warning>
+
+## Host Networking
+
+```yaml
+extra_hosts:
+  - "host.docker.internal:host-gateway"
+```
+
+Allows the container to access services running on the host (Ollama, LM Studio) using `host.docker.internal`.
+
+## Health Checks
+
+```yaml
+healthcheck:
+  test: ["CMD", "curl", "-f", "http://localhost:8002/api/health/ready"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 60s
+```
+
+The health check verifies:
+- ✅ API is responding
+- ✅ Ollama connectivity (if configured)
+- ✅ Disk space and permissions
+
+Docker will restart the container if health checks fail.
+
+## Production Deployment
+
+### 1. Create .env File
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and set:
+- Provider API keys (if using cloud LLMs)
+- `API_KEY` for authentication
+- `CORS_ORIGINS` if accessing from web apps
+
+### 2. Configure Resources
+
+Edit `docker-compose.yml` to match your hardware:
+
+```yaml
+shm_size: '4gb'  # Increase for large sites
+deploy:
+  resources:
+    limits:
+      memory: 8G   # Increase for parallel jobs
+```
+
+### 3. Start in Detached Mode
+
+```bash
+docker compose up -d
+```
+
+View logs:
+```bash
+docker compose logs -f
+```
+
+### 4. Monitor Health
+
+```bash
+curl http://localhost:8002/api/health/ready
+```
+
+Expected response:
+```json
+{
+  "status": "healthy",
+  "ollama_reachable": true,
+  "disk_space_available": true,
+  "data_dir_writable": true
+}
+```
+
+## Public Access via Cloudflare Tunnel
+
+Expose Docrawl to the internet securely without a public IP:
+
+### 1. Create Cloudflare Tunnel
+
+```bash
+cloudflared tunnel create docrawl
+```
+
+### 2. Configure Tunnel
+
+Add to `docker-compose.yml`:
+
+```yaml docker-compose.yml
+services:
+  # ... docrawl service ...
+  
+  cloudflared:
+    image: cloudflare/cloudflared:2024.12.2
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      docrawl:
+        condition: service_healthy
+    restart: unless-stopped
+```
+
+### 3. Set Token
+
+```bash .env
+CLOUDFLARE_TUNNEL_TOKEN=eyJhIjoiY...
+```
+
+### 4. Deploy
+
+```bash
+docker compose up -d
+```
+
+Your Docrawl instance is now accessible at your Cloudflare domain.
+
+<Note>
+See [SETUP.md](https://github.com/plater7/docrawl/blob/main/docs/SETUP.md) for detailed Cloudflare configuration.
+</Note>
+
+## Troubleshooting
+
+<Accordion title="Container keeps restarting">
+  **Check logs:**
+  ```bash
+  docker compose logs docrawl
+  ```
+  
+  **Common causes:**
+  - Insufficient memory (increase limits)
+  - Ollama unreachable (check `OLLAMA_URL`)
+  - Missing `/data` directory (run `./setup.sh`)
+  - Port conflict (another service on 8002)
+</Accordion>
+
+<Accordion title="Cannot connect to Ollama from Docker">
+  **Verify host.docker.internal works:**
+  ```bash
+  docker compose exec docrawl ping host.docker.internal
+  ```
+  
+  **Solutions:**
+  - Ensure Ollama is running: `ollama list`
+  - Check firewall allows port 11434
+  - On Linux, use `--add-host=host.docker.internal:host-gateway`
+  - Alternative: Use bridge network and connect directly
+</Accordion>
+
+<Accordion title="Playwright crashes or timeouts">
+  **Increase shared memory:**
+  ```yaml
+  shm_size: '4gb'
+  ```
+  
+  **Or use /dev/shm mount:**
+  ```yaml
+  volumes:
+    - type: tmpfs
+      target: /dev/shm
+      tmpfs:
+        size: 4294967296  # 4GB
+  ```
+</Accordion>
+
+<Accordion title="High memory usage">
+  **Reduce concurrent operations:**
+  ```bash .env
+  MAX_CONCURRENT_JOBS=2
+  PAGE_POOL_SIZE=3
+  ```
+  
+  **In job config:**
+  ```json
+  {
+    "max_concurrent": 2
+  }
+  ```
+</Accordion>
+
+## System Requirements
+
+| Component | Minimum | Recommended |
+|-----------|---------|-------------|
+| **RAM** | 4GB | 8GB+ |
+| **CPU** | 2 cores | 4+ cores |
+| **Disk** | 5GB free | 20GB+ free |
+| **Docker** | 20.10+ | Latest |
+
+## Related
+
+- [Configuration](/guides/configuration) - Job settings reference
+- [LLM Providers](/guides/llm-providers) - Model configuration
+- [UI Themes](/guides/ui-themes) - Customize the interface

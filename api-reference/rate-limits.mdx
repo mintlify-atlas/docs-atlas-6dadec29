@@ -1,0 +1,196 @@
+---
+title: 'Rate Limits'
+description: 'Understand rate limiting and request throttling in Docrawl'
+---
+
+## Overview
+
+Docrawl implements rate limiting to protect the service from abuse and ensure fair resource allocation. Rate limits are enforced using [SlowAPI](https://slowapi.readthedocs.io/), a FastAPI rate limiting extension.
+
+## Current Rate Limits
+
+The following endpoints have rate limits applied:
+
+| Endpoint | Limit | Window | Description |
+|----------|-------|--------|-------------|
+| `POST /api/jobs` | 10 requests | 1 minute | Create new crawl jobs |
+| `POST /api/jobs/resume-from-state` | 10 requests | 1 minute | Resume jobs from saved state |
+| `GET /api/converters` | 60 requests | 1 minute | List available converters |
+
+<Note>
+Rate limits are applied **per IP address** using the client's remote address.
+</Note>
+
+## Rate Limit Response
+
+When you exceed the rate limit, the API returns a `429 Too Many Requests` status code:
+
+```json
+{
+  "detail": "10 per 1 minute"
+}
+```
+
+<Warning>
+When you receive a 429 response, you should implement exponential backoff and retry the request after waiting.
+</Warning>
+
+## Example Rate Limit Handling
+
+<CodeGroup>
+```python Python
+import time
+import requests
+
+def create_job_with_retry(url, headers, data, max_retries=3):
+    """Create a job with exponential backoff on rate limit."""
+    for attempt in range(max_retries):
+        response = requests.post(url, headers=headers, json=data)
+        
+        if response.status_code == 429:
+            wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+            print(f"Rate limited. Waiting {wait_time}s before retry...")
+            time.sleep(wait_time)
+            continue
+        
+        return response
+    
+    raise Exception("Max retries exceeded")
+
+# Usage
+response = create_job_with_retry(
+    'https://your-docrawl-instance.com/api/jobs',
+    headers={'X-Api-Key': 'your_key', 'Content-Type': 'application/json'},
+    data={'start_url': 'https://docs.example.com', 'model': 'qwen3-coder:free'}
+)
+```
+
+```javascript JavaScript
+async function createJobWithRetry(url, headers, data, maxRetries = 3) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(data)
+    });
+
+    if (response.status === 429) {
+      const waitTime = Math.pow(2, attempt) * 1000; // Exponential backoff
+      console.log(`Rate limited. Waiting ${waitTime}ms before retry...`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      continue;
+    }
+
+    return response;
+  }
+
+  throw new Error('Max retries exceeded');
+}
+
+// Usage
+const response = await createJobWithRetry(
+  'https://your-docrawl-instance.com/api/jobs',
+  {
+    'X-Api-Key': 'your_key',
+    'Content-Type': 'application/json'
+  },
+  {
+    start_url: 'https://docs.example.com',
+    model: 'qwen3-coder:free'
+  }
+);
+```
+
+```bash cURL with Retry
+#!/bin/bash
+
+URL="https://your-docrawl-instance.com/api/jobs"
+API_KEY="your_secret_key_here"
+MAX_RETRIES=3
+
+for i in $(seq 1 $MAX_RETRIES); do
+  response=$(curl -s -w "\n%{http_code}" -X POST "$URL" \
+    -H "X-Api-Key: $API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"start_url": "https://docs.example.com", "model": "qwen3-coder:free"}')
+  
+  http_code=$(echo "$response" | tail -n1)
+  body=$(echo "$response" | head -n-1)
+  
+  if [ "$http_code" -eq 429 ]; then
+    wait_time=$((2 ** (i - 1)))
+    echo "Rate limited. Waiting ${wait_time}s before retry..."
+    sleep $wait_time
+  else
+    echo "$body"
+    break
+  fi
+done
+```
+</CodeGroup>
+
+## Concurrent Job Limits
+
+In addition to rate limits, Docrawl enforces a **concurrent job limit** to prevent resource exhaustion:
+
+```bash
+MAX_CONCURRENT_JOBS=5  # Default value
+```
+
+When the maximum number of active jobs is reached, `POST /api/jobs` returns a `429` response:
+
+```json
+{
+  "detail": "Too many active jobs (5/5). Try again later."
+}
+```
+
+<Note>
+This limit applies to **active jobs** (running or pending), not completed jobs. Configure this using the `MAX_CONCURRENT_JOBS` environment variable.
+</Note>
+
+## Implementation Details
+
+Rate limiting is configured in `src/api/routes.py:33`:
+
+```python
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
+```
+
+Rate limits are applied using the `@limiter.limit()` decorator:
+
+```python
+@router.post("/jobs")
+@limiter.limit("10/minute")
+async def create_job(request: Request, job_request: JobRequest) -> JobStatus:
+    # Implementation in src/api/routes.py:91-107
+    ...
+```
+
+The global rate limit handler is defined in `src/main.py:128-130`:
+
+```python
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(status_code=429, content={"detail": str(exc.detail)})
+```
+
+## Best Practices
+
+<Warning>
+**Recommendations for handling rate limits:**
+
+1. **Implement retry logic** with exponential backoff
+2. **Monitor your usage** to stay within limits
+3. **Batch operations** when possible to reduce API calls
+4. **Cache responses** to avoid redundant requests
+5. **Use webhooks or SSE** for job status updates instead of polling
+6. **Respect 429 responses** — don't immediately retry
+</Warning>
+
+<Note>
+**For self-hosted instances**, you can adjust rate limits by modifying the `@limiter.limit()` decorator values in `src/api/routes.py` and redeploying.
+</Note>

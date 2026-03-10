@@ -1,0 +1,197 @@
+---
+title: "JobRequest"
+description: "Request model for creating a new crawl job"
+---
+
+The `JobRequest` model defines all configuration options for creating a new documentation crawl job. It includes settings for LLM models, crawling behavior, output format, and various optimization features.
+
+## Fields
+
+<ParamField path="url" type="HttpUrl" required>
+  The base URL of the documentation site to crawl. Must be a valid HTTP or HTTPS URL.
+  
+  **Example:** `https://docs.example.com`
+</ParamField>
+
+<ParamField path="crawl_model" type="string" required>
+  LLM model used for URL filtering during the crawling phase. Must match pattern `^[\w./:@-]{1,100}$`.
+  
+  **Example:** `mistral:latest`, `openrouter/anthropic/claude-3.5-sonnet`
+</ParamField>
+
+<ParamField path="pipeline_model" type="string" required>
+  LLM model used for markdown cleanup and content processing. Must match pattern `^[\w./:@-]{1,100}$`.
+  
+  **Example:** `qwen3-coder:free`, `ollama/llama3`
+</ParamField>
+
+<ParamField path="reasoning_model" type="string" required>
+  LLM model reserved for future use in site structure analysis and quality assessment. Must match pattern `^[\w./:@-]{1,100}$`.
+  
+  **Note:** Currently passed through but not actively used by the pipeline.
+</ParamField>
+
+<ParamField path="output_path" type="string" default="/data/output">
+  Directory path where crawled markdown files will be saved. Must be under `/data` to prevent path traversal attacks.
+  
+  **Validation:** Path is resolved and checked to ensure it starts with `/data`.
+</ParamField>
+
+<ParamField path="delay_ms" type="integer" default={500}>
+  Delay in milliseconds between processing each page. Helps prevent rate limiting.
+  
+  **Constraints:** Must be between 100 and 60000 (100ms to 60 seconds).
+</ParamField>
+
+<ParamField path="max_concurrent" type="integer" default={3}>
+  Maximum number of pages to process concurrently.
+  
+  **Constraints:** Must be between 1 and 10.
+</ParamField>
+
+<ParamField path="max_depth" type="integer" default={5}>
+  Maximum link depth to crawl from the base URL.
+  
+  **Constraints:** Must be between 1 and 20.
+</ParamField>
+
+<ParamField path="respect_robots_txt" type="boolean" default={true}>
+  Whether to respect the site's robots.txt file, including crawl-delay directives and disallowed paths.
+</ParamField>
+
+<ParamField path="use_native_markdown" type="boolean" default={true}>
+  Try to fetch native markdown via content negotiation before falling back to HTML conversion. Significantly faster when supported.
+</ParamField>
+
+<ParamField path="use_markdown_proxy" type="boolean" default={false}>
+  Use a markdown conversion proxy service as a fallback before Playwright.
+</ParamField>
+
+<ParamField path="markdown_proxy_url" type="string | null" default={null}>
+  Custom URL for the markdown proxy service. Defaults to `https://markdown.new` if `use_markdown_proxy` is enabled.
+  
+  **Validation:** Must use HTTPS scheme and pass SSRF protection checks.
+</ParamField>
+
+<ParamField path="use_http_fast_path" type="boolean" default={true}>
+  Try plain HTTP requests before launching Playwright. Provides significant performance improvement for static sites.
+</ParamField>
+
+<ParamField path="use_cache" type="boolean" default={false}>
+  Enable 24-hour disk cache for fetched HTML pages. Cached pages are stored in `{output_path}/.cache`.
+</ParamField>
+
+<ParamField path="output_format" type="'markdown' | 'json'" default="markdown">
+  Output format for crawled content:
+  - `markdown`: Standard markdown files (`.md`)
+  - `json`: Structured JSON with semantic content blocks (`.json`)
+</ParamField>
+
+<ParamField path="use_pipeline_mode" type="boolean" default={false}>
+  Enable producer/consumer pipeline architecture instead of default concurrent processing. Uses a bounded queue for natural backpressure.
+</ParamField>
+
+<ParamField path="converter" type="string | null" default={null}>
+  Name of the HTML-to-Markdown converter plugin to use. If `null`, uses the default `markdownify` converter.
+  
+  **Validation:** Must match pattern `^[\w-]{1,50}$` and exist in the converter registry.
+  
+  **Example:** `markdownify`
+</ParamField>
+
+<ParamField path="language" type="string" default="en">
+  Primary language code for content filtering. Used during URL discovery to filter out non-documentation pages.
+  
+  **Constraints:** Maximum 10 characters.
+</ParamField>
+
+<ParamField path="filter_sitemap_by_path" type="boolean" default={true}>
+  Filter sitemap URLs by matching path prefixes with the base URL. Helps stay within the documentation section.
+</ParamField>
+
+## Validation Rules
+
+### Output Path Security
+
+The `output_path` field has strict validation to prevent path traversal attacks:
+
+```python
+resolved = Path("/data").joinpath(v.lstrip("/")).resolve()
+if not str(resolved).startswith("/data"):
+    raise ValueError("output_path must be under /data")
+```
+
+### Markdown Proxy URL Security
+
+The `markdown_proxy_url` field validates HTTPS and prevents SSRF attacks:
+
+```python
+if parsed.scheme != "https":
+    raise ValueError("markdown_proxy_url must use HTTPS")
+validate_url_not_ssrf(str(v))  # Checks for private IP ranges
+```
+
+### Converter Validation
+
+The `converter` field is validated against the available converter registry:
+
+```python
+if self.converter not in available_converters():
+    raise ValueError(f"Converter '{self.converter}' not found")
+```
+
+## Example Request
+
+```json
+{
+  "url": "https://docs.example.com",
+  "crawl_model": "mistral:latest",
+  "pipeline_model": "qwen3-coder:free",
+  "reasoning_model": "mistral:latest",
+  "output_path": "/data/output/example-docs",
+  "delay_ms": 500,
+  "max_concurrent": 3,
+  "max_depth": 5,
+  "respect_robots_txt": true,
+  "use_native_markdown": true,
+  "use_markdown_proxy": false,
+  "markdown_proxy_url": null,
+  "use_http_fast_path": true,
+  "use_cache": false,
+  "output_format": "markdown",
+  "use_pipeline_mode": false,
+  "converter": null,
+  "language": "en",
+  "filter_sitemap_by_path": true
+}
+```
+
+## Minimal Request
+
+```json
+{
+  "url": "https://docs.example.com",
+  "crawl_model": "mistral:latest",
+  "pipeline_model": "qwen3-coder:free",
+  "reasoning_model": "mistral:latest"
+}
+```
+
+## Performance Optimization Tips
+
+<Tip>
+  Enable `use_http_fast_path` and `use_native_markdown` for best performance on static documentation sites.
+</Tip>
+
+<Warning>
+  Setting `max_concurrent` too high may trigger rate limiting. Start with 3 and adjust based on the target site's tolerance.
+</Warning>
+
+<Info>
+  Use `use_cache: true` when iterating on the same documentation site to avoid redundant fetches.
+</Info>
+
+## Related Models
+
+- [JobStatus](/api-reference/models/job-status) - Response model for job creation and status queries
+- [ResumeFromStateRequest](/api-reference/models/resume-request) - Resume a paused job from checkpoint
