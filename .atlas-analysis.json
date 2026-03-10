@@ -1,0 +1,127 @@
+{
+  "projectType": "api-service",
+  "projectName": "Docrawl",
+  "projectDescription": "Web crawler for documentation sites that converts pages to clean Markdown using Playwright, markdownify, and LLMs",
+  "theme": "aspen",
+  "primaryColor": "#848c8e",
+  "lightColor": "#11161e",
+  "darkColor": "#cfd0d2",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/llm-providers",
+              "guides/configuration",
+              "guides/docker-deployment",
+              "guides/output-formats",
+              "guides/ui-themes"
+            ]
+          },
+          {
+            "group": "Use Cases",
+            "pages": [
+              "use-cases/crawling-strategies",
+              "use-cases/filtering-urls",
+              "use-cases/pause-resume"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api-reference/authentication",
+              "api-reference/rate-limits"
+            ]
+          },
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api-reference/endpoints/jobs",
+              "api-reference/endpoints/events",
+              "api-reference/endpoints/providers",
+              "api-reference/endpoints/models",
+              "api-reference/endpoints/health"
+            ]
+          },
+          {
+            "group": "Models",
+            "pages": [
+              "api-reference/models/job-request",
+              "api-reference/models/job-status",
+              "api-reference/models/job-events"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Advanced",
+        "groups": [
+          {
+            "group": "Architecture",
+            "pages": [
+              "advanced/architecture",
+              "advanced/pipeline-phases",
+              "advanced/scraping-fallbacks"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "advanced/security",
+              "advanced/performance",
+              "advanced/troubleshooting"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "advanced/contributing",
+              "advanced/testing",
+              "advanced/changelog"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Intelligent URL discovery via sitemap, navigation parsing, and recursive crawl",
+    "LLM-powered URL filtering and markdown cleanup",
+    "Multi-provider LLM support (Ollama, OpenRouter, OpenCode, LM Studio)",
+    "5-level scraping fallback chain (cache, native markdown, proxy, HTTP, Playwright)",
+    "Real-time SSE progress streaming with synthwave UI",
+    "Docker-ready with PagePool optimization",
+    "Pause/resume support with checkpoint persistence",
+    "Structured JSON and Markdown output formats"
+  ],
+  "publicApiSurface": [
+    "POST /api/jobs - Create crawl job",
+    "GET /api/jobs/{id}/events - SSE event stream",
+    "GET /api/jobs/{id}/status - Job status",
+    "POST /api/jobs/{id}/cancel - Cancel job",
+    "POST /api/jobs/{id}/pause - Pause job",
+    "POST /api/jobs/{id}/resume - Resume paused job",
+    "POST /api/jobs/resume-from-state - Resume from checkpoint",
+    "GET /api/providers - List LLM providers",
+    "GET /api/models - List available models",
+    "GET /api/converters - List HTML converters",
+    "GET /api/health/ready - Readiness check",
+    "GET /api/info - App metadata"
+  ]
+}
